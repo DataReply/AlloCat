@@ -16,7 +16,13 @@ import {
   Armchair,
   Layers,
   ShieldCheck,
-  MonitorDown
+  MonitorDown,
+  Database,
+  FileCode2,
+  ChevronDown,
+  ChevronUp,
+  Play,
+  HardDrive
 } from 'lucide-react';
 import { ViewMode, DEFAULT_LEAVE_TYPE_CONFIG } from '../types';
 import { AppState } from '../data/seedData';
@@ -34,6 +40,18 @@ import {
   importDataFromFileContent,
   triggerFileDownload
 } from '../utils/importExportUtils';
+import {
+  SQLITE_RELATIONAL_SCHEMA_DDL,
+  SQLiteDatabaseStats,
+  getSQLiteDatabaseStats,
+  syncAppStateToSQLite,
+  exportSQLiteBinaryFile,
+  exportSQLDumpScript,
+  importSQLiteBinaryFile,
+  importSQLDumpScript,
+  isSQLiteBinaryHeader,
+  runReadOnlySQLQuery
+} from '../utils/sqliteDatabase';
 
 interface ExportImportModalProps {
   isOpen: boolean;
@@ -116,6 +134,20 @@ const SCOPE_TABS: Array<{
   }
 ];
 
+function triggerBinaryDownload(bytes: Uint8Array, filename: string, mimeType: string) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const blob = new Blob([copy.buffer], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   isOpen,
   onClose,
@@ -136,13 +168,29 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     message: string;
   } | null>(null);
   const [isBundlingHtml, setIsBundlingHtml] = useState(false);
+  const [isExportingSqlite, setIsExportingSqlite] = useState(false);
+  const [sqliteStats, setSqliteStats] = useState<SQLiteDatabaseStats>(() =>
+    getSQLiteDatabaseStats(appState)
+  );
+  const [showSchemaInspector, setShowSchemaInspector] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<'ddl' | 'query'>('ddl');
+  const [sqlQueryText, setSqlQueryText] = useState<string>(
+    `SELECT person_name, department, client_name, project_code, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
+  );
+  const [sqlQueryResult, setSqlQueryResult] = useState<{
+    columns: string[];
+    rows: unknown[][];
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
       setSelectedScope(initialScope || activeViewMode || 'all');
       setStatus(null);
+      setSqlQueryResult(null);
+      syncAppStateToSQLite(appState).then((stats) => setSqliteStats(stats));
     }
-  }, [isOpen, initialScope, activeViewMode]);
+  }, [isOpen, initialScope, activeViewMode, appState]);
 
   if (!isOpen) return null;
 
@@ -152,6 +200,76 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   const leaveTypesCount = Object.keys(
     appState.leaveTypes || DEFAULT_LEAVE_TYPE_CONFIG
   ).length;
+
+  const formattedSizeKb =
+    sqliteStats.byteSize > 0
+      ? `${(sqliteStats.byteSize / 1024).toFixed(1)} KB`
+      : 'Syncing...';
+
+  const handleExportSQLiteBinary = async () => {
+    setIsExportingSqlite(true);
+    setStatus(null);
+    try {
+      const bytes = await exportSQLiteBinaryFile(appState);
+      setSqliteStats(getSQLiteDatabaseStats(appState));
+      triggerBinaryDownload(
+        bytes,
+        `allocat-workspace-${dateStr}.sqlite`,
+        'application/vnd.sqlite3'
+      );
+      setStatus({
+        type: 'success',
+        message: `Exported binary SQLite 3 database (allocat-workspace-${dateStr}.sqlite, ${(
+          bytes.byteLength / 1024
+        ).toFixed(1)} KB) with all 9 relational tables and analytical views.`
+      });
+    } catch (err) {
+      setStatus({
+        type: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Failed to export SQLite database binary.'
+      });
+    } finally {
+      setIsExportingSqlite(false);
+    }
+  };
+
+  const handleExportSQLDump = () => {
+    setStatus(null);
+    try {
+      const script = exportSQLDumpScript(appState);
+      triggerFileDownload(
+        script,
+        `allocat-database-${dateStr}.sql`,
+        'application/sql;charset=utf-8'
+      );
+      setStatus({
+        type: 'success',
+        message: `Exported normalized SQLite DDL & INSERT script (allocat-database-${dateStr}.sql) covering all ${appState.people.length} people, ${appState.projects.length} projects, and ${appState.allocations.length} allocations.`
+      });
+    } catch (err) {
+      setStatus({
+        type: 'error',
+        message:
+          err instanceof Error ? err.message : 'Failed to generate .sql script dump.'
+      });
+    }
+  };
+
+  const handleRunInspectorQuery = async () => {
+    try {
+      const res = await runReadOnlySQLQuery(sqlQueryText);
+      setSqlQueryResult({ columns: res.columns, rows: res.rows });
+    } catch (err) {
+      setSqlQueryResult({
+        columns: [],
+        rows: [],
+        error: err instanceof Error ? err.message : 'Failed to execute SQL query.'
+      });
+    }
+  };
 
   // Download self-contained single-file HTML browser app with current state embedded
   const handleDownloadStandaloneHTML = async () => {
@@ -226,7 +344,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     } catch {
       setStatus({
         type: 'error',
-        message: 'Could not bundle standalone HTML file. Please use JSON or CSV export below.'
+        message: 'Could not bundle standalone HTML file. Please use SQLite, JSON, or CSV export below.'
       });
     } finally {
       setIsBundlingHtml(false);
@@ -360,10 +478,45 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const lowerName = file.name.toLowerCase();
     const reader = new FileReader();
-    reader.onload = (event) => {
+
+    reader.onload = async (event) => {
       try {
-        const text = event.target?.result as string;
+        const buffer = event.target?.result as ArrayBuffer;
+        if (!buffer) {
+          throw new Error('Could not read uploaded file contents.');
+        }
+        const bytes = new Uint8Array(buffer);
+
+        if (
+          lowerName.endsWith('.sqlite') ||
+          lowerName.endsWith('.db') ||
+          lowerName.endsWith('.sqlite3') ||
+          isSQLiteBinaryHeader(bytes)
+        ) {
+          const result = await importSQLiteBinaryFile(bytes, appState, mergeMode);
+          onImportState(result.nextState);
+          setSqliteStats(getSQLiteDatabaseStats(result.nextState));
+          setStatus({
+            type: 'success',
+            message: result.summaryMessage
+          });
+          return;
+        }
+
+        const text = new TextDecoder('utf-8').decode(bytes);
+        if (lowerName.endsWith('.sql')) {
+          const result = await importSQLDumpScript(text, appState, mergeMode);
+          onImportState(result.nextState);
+          setSqliteStats(getSQLiteDatabaseStats(result.nextState));
+          setStatus({
+            type: 'success',
+            message: result.summaryMessage
+          });
+          return;
+        }
+
         const result = importDataFromFileContent(
           text,
           file.name,
@@ -372,6 +525,8 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
           mergeMode
         );
         onImportState(result.nextState);
+        const updatedStats = await syncAppStateToSQLite(result.nextState);
+        setSqliteStats(updatedStats);
         setStatus({
           type: 'success',
           message: result.summaryMessage
@@ -382,29 +537,30 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
           message:
             err instanceof Error
               ? err.message
-              : 'Failed to parse file. Please upload a valid AlloCat .CSV or .JSON file.'
+              : 'Failed to parse file. Upload a valid .SQLITE, .DB, .SQL, .CSV, or .JSON file.'
         });
       }
     };
-    reader.readAsText(file);
+
+    reader.readAsArrayBuffer(file);
     e.target.value = '';
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-3xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="px-5 py-4 bg-slate-50 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <Download className="w-4 h-4" />
+              <Database className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-                Import & Export Center — All Views & Admin Directories ({appState.selectedYear})
+                SQLite Database, Import & Export Center ({appState.selectedYear})
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Export or import CSV spreadsheets and JSON backups for any matrix view, Admin Panel directory, or standalone app
+                Normalized in-browser SQLite 3 relational storage alongside CSV spreadsheets and JSON backups
               </p>
             </div>
           </div>
@@ -420,9 +576,9 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
         <div className="px-5 pt-3 pb-2.5 bg-slate-50/60 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Select Module / View to Export or Import:
+              Select Module / View for CSV & JSON:
             </span>
-            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono text-slate-500 dark:text-slate-400">
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
               <span className="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
                 {appState.clients.length} Clients
               </span>
@@ -485,13 +641,257 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             </div>
           )}
 
-          {/* Selected Scope Banner & Export Actions */}
+          {/* SQLite Relational Database Engine & Schema Hub */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/80 space-y-3.5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex items-center gap-1.5">
+                    <Database className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                    <span>SQLite Relational Storage Engine</span>
+                  </h3>
+                  <span className="text-[10px] font-mono tabular-nums px-2 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800">
+                    {sqliteStats.engineLabel}
+                  </span>
+                  <span className="text-[10px] font-mono tabular-nums px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center gap-1">
+                    <HardDrive className="w-2.5 h-2.5" />
+                    <span>{formattedSizeKb}</span>
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  All edits automatically synchronize into 9 normalized relational tables persisted locally in IndexedDB and compatible with standard SQLite 3 desktop tools.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowSchemaInspector((v) => !v)}
+                className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 text-slate-700 dark:text-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <FileCode2 className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>Schema & SQL Inspector</span>
+                {showSchemaInspector ? (
+                  <ChevronUp className="w-3.5 h-3.5" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5" />
+                )}
+              </button>
+            </div>
+
+            {/* Live Table Row Counts */}
+            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5">
+              {sqliteStats.tables.map((t) => (
+                <div
+                  key={t.tableName}
+                  className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/70 flex flex-col"
+                >
+                  <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                    {t.tableName}
+                  </span>
+                  <span className="text-xs font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                    {t.rowCount}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* Expandable Schema DDL & Live Read-Only Query Inspector */}
+            {showSchemaInspector && (
+              <div className="rounded-xl bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 overflow-hidden">
+                <div className="px-3 py-2 bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setInspectorTab('ddl')}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                        inspectorTab === 'ddl'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      Relational Schema (DDL + Views)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInspectorTab('query')}
+                      className={`px-2.5 py-1 rounded text-[11px] font-medium cursor-pointer transition-colors ${
+                        inspectorTab === 'query'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      SQL Query Console
+                    </button>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400">
+                    PRAGMA foreign_keys = ON
+                  </span>
+                </div>
+
+                {inspectorTab === 'ddl' ? (
+                  <pre className="p-3 text-[11px] font-mono leading-relaxed text-slate-700 dark:text-slate-300 overflow-x-auto max-h-60 overflow-y-auto">
+                    {SQLITE_RELATIONAL_SCHEMA_DDL}
+                  </pre>
+                ) : (
+                  <div className="p-3 space-y-2.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                        Presets:
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSqlQueryText(
+                            `SELECT person_name, department, client_name, project_code, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
+                          )
+                        }
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-500 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                      >
+                        v_allocation_months
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSqlQueryText(
+                            `SELECT full_name, department, employment_type, avg_allocated_pct, max_capacity_percent\nFROM v_person_annual_summary\nWHERE year = ${appState.selectedYear}\nORDER BY avg_allocated_pct DESC;`
+                          )
+                        }
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-500 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                      >
+                        v_person_annual_summary
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSqlQueryText(
+                            `SELECT c.name AS client, COUNT(p.id) AS projects\nFROM clients c\nLEFT JOIN projects p ON p.client_id = c.id\nGROUP BY c.id\nORDER BY projects DESC;`
+                          )
+                        }
+                        className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-500 border border-slate-200 dark:border-slate-700 cursor-pointer"
+                      >
+                        clients_summary
+                      </button>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <textarea
+                        value={sqlQueryText}
+                        onChange={(e) => setSqlQueryText(e.target.value)}
+                        rows={4}
+                        className="flex-1 p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 font-mono text-[11px] text-slate-800 dark:text-slate-200 focus:outline-none focus:border-indigo-500"
+                        placeholder="SELECT * FROM people LIMIT 10;"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleRunInspectorQuery}
+                        className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer shrink-0 self-start"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        <span>Run SELECT</span>
+                      </button>
+                    </div>
+
+                    {sqlQueryResult?.error && (
+                      <div className="p-2 rounded bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-[11px] text-rose-700 dark:text-rose-200 font-mono">
+                        {sqlQueryResult.error}
+                      </div>
+                    )}
+
+                    {sqlQueryResult && !sqlQueryResult.error && (
+                      <div className="overflow-x-auto max-h-48 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-lg">
+                        {sqlQueryResult.columns.length === 0 ? (
+                          <div className="p-2.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            Query returned 0 rows.
+                          </div>
+                        ) : (
+                          <table className="w-full text-left border-collapse text-[11px] font-mono tabular-nums">
+                            <thead className="bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-300">
+                              <tr>
+                                {sqlQueryResult.columns.map((col) => (
+                                  <th
+                                    key={col}
+                                    className="px-2.5 py-1.5 border-b border-slate-200 dark:border-slate-800 font-semibold whitespace-nowrap"
+                                  >
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sqlQueryResult.rows.map((row, idx) => (
+                                <tr
+                                  key={idx}
+                                  className="odd:bg-white even:bg-slate-50/70 dark:odd:bg-slate-950 dark:even:bg-slate-900/50"
+                                >
+                                  {row.map((val, cIdx) => (
+                                    <td
+                                      key={cIdx}
+                                      className="px-2.5 py-1 border-b border-slate-100 dark:border-slate-800/60 text-slate-700 dark:text-slate-300 whitespace-nowrap"
+                                    >
+                                      {val === null || val === undefined ? 'NULL' : String(val)}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* SQLite Binary & SQL Script Export Buttons */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                disabled={isExportingSqlite}
+                onClick={handleExportSQLiteBinary}
+                className="flex items-start gap-3 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-indigo-500 dark:hover:border-indigo-500 disabled:opacity-50 text-left transition-all cursor-pointer group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-indigo-100 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <Database className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    {isExportingSqlite
+                      ? 'Building Binary Database...'
+                      : 'Export SQLite Database (.SQLITE)'}
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Native SQLite 3 binary file compatible with DB Browser, DBeaver, and CLI.
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportSQLDump}
+                className="flex items-start gap-3 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-violet-500 dark:hover:border-violet-500 text-left transition-all cursor-pointer group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <FileCode2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Export SQL Script Dump (.SQL)
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                    Human-readable DDL schema + INSERT statements for Git diffs & audits.
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Selected Scope Banner & Export Actions (CSV + JSON) */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3.5">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex items-center gap-2">
                   <span>Export: {currentTabConfig.label}</span>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                  <span className="text-[10px] font-mono tabular-nums px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
                     {appState.selectedYear}
                   </span>
                 </h3>
@@ -570,16 +970,21 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             )}
           </div>
 
-          {/* Import Section for Selected Tab / View (Supports both .CSV and .JSON) */}
+          {/* Unified Import Section (.SQLITE, .DB, .SQL, .CSV, .JSON) */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                  Import into {currentTabConfig.label} (.CSV or .JSON)
+                  Unified Import (.SQLITE / .DB / .SQL / .CSV / .JSON)
                 </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Upload any exported <code className="font-mono">.csv</code> spreadsheet or{' '}
-                  <code className="font-mono">.json</code> file to update people, departments, clients, projects, allocations, custom leave types, or leaves.
+                  Upload any SQLite binary (<code className="font-mono">.sqlite</code>,{' '}
+                  <code className="font-mono">.db</code>), <code className="font-mono">.sql</code> dump script,{' '}
+                  <code className="font-mono">.csv</code> spreadsheet, or <code className="font-mono">.json</code> backup into{' '}
+                  <span className="font-medium text-slate-700 dark:text-slate-300">
+                    {currentTabConfig.shortLabel}
+                  </span>
+                  .
                 </p>
               </div>
 
@@ -605,7 +1010,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                       ? 'bg-amber-600 text-white font-semibold'
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
-                  title="Replace existing records for this view/year with the imported file"
+                  title="Replace existing records with the imported database or file"
                 >
                   Replace Existing
                 </button>
@@ -682,7 +1087,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv,.json,text/csv,application/json"
+              accept=".sqlite,.db,.sqlite3,.sql,.csv,.json,text/csv,application/json"
               onChange={handleFileChange}
               className="hidden"
             />
@@ -693,7 +1098,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             >
               <Upload className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>
-                Select .CSV or .JSON File to Import ({currentTabConfig.shortLabel})
+                Select .SQLITE, .DB, .SQL, .CSV, or .JSON File to Import ({mergeMode === 'merge' ? 'Merge & Update' : 'Replace Existing'})
               </span>
             </button>
           </div>
@@ -756,7 +1161,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                 onResetToDefault();
                 setStatus({
                   type: 'success',
-                  message: 'Workspace reset to default demo data.'
+                  message: 'Workspace and SQLite database reset to default demo data.'
                 });
               }}
               className="text-xs font-medium text-slate-500 hover:text-rose-600 flex items-center gap-1.5 cursor-pointer"

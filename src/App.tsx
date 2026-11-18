@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   ViewMode,
   FilterState,
@@ -50,10 +50,17 @@ import {
   saveAuthCredentials
 } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
+import {
+  initSQLiteWorkspace,
+  syncAppStateToSQLite,
+  resetSQLiteWorkspace
+} from './utils/sqliteDatabase';
 
 export function App() {
   const isOnline = useOnlineStatus();
   const [appState, setAppState] = useState<AppState>(() => loadAppState());
+  const isSqliteReadyRef = useRef(false);
+  const skipNextSqliteSyncRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('clients');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [authCredentials, setAuthCredentials] = useState<AuthCredentials>(() =>
@@ -137,9 +144,29 @@ export function App() {
   }>({ isOpen: false, tab: 'departments' });
   const [isStandaloneModalOpen, setIsStandaloneModalOpen] = useState(false);
 
-  // Save state changes to localStorage
+  // Boot SQLite WebAssembly engine and hydrate state if stored in IndexedDB/SQLite
+  useEffect(() => {
+    let cancelled = false;
+    initSQLiteWorkspace(loadAppState()).then(({ state }) => {
+      if (cancelled) return;
+      isSqliteReadyRef.current = true;
+      skipNextSqliteSyncRef.current = true;
+      setAppState(state);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Save state changes to localStorage and sync to relational SQLite engine
   useEffect(() => {
     saveAppState(appState);
+    if (!isSqliteReadyRef.current) return;
+    if (skipNextSqliteSyncRef.current) {
+      skipNextSqliteSyncRef.current = false;
+      return;
+    }
+    syncAppStateToSQLite(appState);
   }, [appState]);
 
   // Toggle dark mode class on root html element
@@ -1162,7 +1189,11 @@ export function App() {
           setExportModalScope(scope);
           setIsExportModalOpen(true);
         }}
-        onResetWorkspace={() => setAppState(resetAppState())}
+        onResetWorkspace={() => {
+          const fresh = resetAppState();
+          setAppState(fresh);
+          resetSQLiteWorkspace(fresh);
+        }}
       />
 
       <ReportingModal
@@ -1265,7 +1296,11 @@ export function App() {
         activeViewMode={viewMode}
         initialScope={exportModalScope}
         onImportState={(newState) => setAppState(newState)}
-        onResetToDefault={() => setAppState(resetAppState())}
+        onResetToDefault={() => {
+          const fresh = resetAppState();
+          setAppState(fresh);
+          resetSQLiteWorkspace(fresh);
+        }}
         onOpenStandaloneModal={() => {
           setIsExportModalOpen(false);
           setIsStandaloneModalOpen(true);
