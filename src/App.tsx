@@ -5,12 +5,14 @@ import {
   Person,
   Client,
   Project,
+  AllocationStatus,
   LeaveEntry,
   LeaveType,
   LeaveTypeMeta,
   DEFAULT_LEAVE_TYPE_CONFIG,
   Department,
-  EmploymentType
+  EmploymentType,
+  normalizeAllocationStatuses
 } from './types';
 import {
   AppState,
@@ -416,6 +418,7 @@ export function App() {
 
   const handleSaveCellAllocation = (
     newPercentage: number,
+    newStatus: AllocationStatus,
     fillOptions?: { applyToAllRemaining?: boolean; applyToAllYear?: boolean }
   ) => {
     if (!activeCellEditor) return;
@@ -433,32 +436,53 @@ export function App() {
 
       if (existingIdx >= 0) {
         const updatedMonths = [...nextAllocations[existingIdx].monthlyPercentage];
+        const updatedStatuses = normalizeAllocationStatuses(
+          nextAllocations[existingIdx].monthlyStatus,
+          'unknown'
+        );
         if (fillOptions?.applyToAllYear) {
-          for (let m = 0; m < 12; m++) updatedMonths[m] = newPercentage;
+          for (let m = 0; m < 12; m++) {
+            updatedMonths[m] = newPercentage;
+            updatedStatuses[m] = newStatus;
+          }
         } else if (fillOptions?.applyToAllRemaining) {
-          for (let m = monthIndex; m < 12; m++) updatedMonths[m] = newPercentage;
+          for (let m = monthIndex; m < 12; m++) {
+            updatedMonths[m] = newPercentage;
+            updatedStatuses[m] = newStatus;
+          }
         } else {
           updatedMonths[monthIndex] = newPercentage;
+          updatedStatuses[monthIndex] = newStatus;
         }
         nextAllocations[existingIdx] = {
           ...nextAllocations[existingIdx],
-          monthlyPercentage: updatedMonths
+          monthlyPercentage: updatedMonths,
+          monthlyStatus: updatedStatuses
         };
       } else {
         const freshMonths = Array(12).fill(0);
+        const freshStatuses: AllocationStatus[] = Array(12).fill('unknown');
         if (fillOptions?.applyToAllYear) {
-          for (let m = 0; m < 12; m++) freshMonths[m] = newPercentage;
+          for (let m = 0; m < 12; m++) {
+            freshMonths[m] = newPercentage;
+            freshStatuses[m] = newStatus;
+          }
         } else if (fillOptions?.applyToAllRemaining) {
-          for (let m = monthIndex; m < 12; m++) freshMonths[m] = newPercentage;
+          for (let m = monthIndex; m < 12; m++) {
+            freshMonths[m] = newPercentage;
+            freshStatuses[m] = newStatus;
+          }
         } else {
           freshMonths[monthIndex] = newPercentage;
+          freshStatuses[monthIndex] = newStatus;
         }
         nextAllocations.push({
           id: `a-${Date.now()}`,
           personId,
           projectId,
           year: prev.selectedYear,
-          monthlyPercentage: freshMonths
+          monthlyPercentage: freshMonths,
+          monthlyStatus: freshStatuses
         });
       }
 
@@ -492,12 +516,31 @@ export function App() {
     }));
   };
 
+  const handleUpdateAllocationStatus = (
+    allocationId: string,
+    monthIndex: number,
+    nextStatus: AllocationStatus
+  ) => {
+    setAppState((prev) => ({
+      ...prev,
+      allocations: prev.allocations.map((a) => {
+        if (a.id === allocationId) {
+          const nextStatuses = normalizeAllocationStatuses(a.monthlyStatus, 'unknown');
+          nextStatuses[monthIndex] = nextStatus;
+          return { ...a, monthlyStatus: nextStatuses };
+        }
+        return a;
+      })
+    }));
+  };
+
   const handleBatchAssign = (
     personId: string,
     projectId: string,
     startMonth: number,
     endMonth: number,
     percentage: number,
+    status: AllocationStatus,
     notes?: string
   ) => {
     setAppState((prev) => {
@@ -511,18 +554,26 @@ export function App() {
 
       if (existingIdx >= 0) {
         const updatedMonths = [...nextAllocations[existingIdx].monthlyPercentage];
+        const updatedStatuses = normalizeAllocationStatuses(
+          nextAllocations[existingIdx].monthlyStatus,
+          'unknown'
+        );
         for (let m = startMonth; m <= endMonth; m++) {
           updatedMonths[m] = percentage;
+          updatedStatuses[m] = status;
         }
         nextAllocations[existingIdx] = {
           ...nextAllocations[existingIdx],
           monthlyPercentage: updatedMonths,
+          monthlyStatus: updatedStatuses,
           notes: notes !== undefined ? notes : nextAllocations[existingIdx].notes
         };
       } else {
         const freshMonths = Array(12).fill(0);
+        const freshStatuses: AllocationStatus[] = Array(12).fill('unknown');
         for (let m = startMonth; m <= endMonth; m++) {
           freshMonths[m] = percentage;
+          freshStatuses[m] = status;
         }
         nextAllocations.push({
           id: `a-${Date.now()}`,
@@ -530,6 +581,7 @@ export function App() {
           projectId,
           year: prev.selectedYear,
           monthlyPercentage: freshMonths,
+          monthlyStatus: freshStatuses,
           notes
         });
       }
@@ -852,6 +904,8 @@ export function App() {
     );
     const currentPercentage =
       existingAlloc?.monthlyPercentage[activeCellEditor.monthIndex] || 0;
+    const currentStatus: AllocationStatus =
+      existingAlloc?.monthlyStatus?.[activeCellEditor.monthIndex] || 'unknown';
 
     const otherAllocsSum = allocations
       .filter(
@@ -870,6 +924,7 @@ export function App() {
       project,
       monthIndex: activeCellEditor.monthIndex,
       currentPercentage,
+      currentStatus,
       otherAllocsSum,
       existingAllocId: existingAlloc?.id
     };
@@ -972,6 +1027,7 @@ export function App() {
             onOpenCellEditor={(personId, projectId, monthIndex) =>
               setActiveCellEditor({ personId, projectId, monthIndex })
             }
+            onUpdateAllocationStatus={handleUpdateAllocationStatus}
             onOpenAssignModalForProject={(projectId) =>
               setAssignModalState({ isOpen: true, projectId })
             }
@@ -1012,6 +1068,7 @@ export function App() {
             onOpenCellEditor={(personId, projectId, monthIndex) =>
               setActiveCellEditor({ personId, projectId, monthIndex })
             }
+            onUpdateAllocationStatus={handleUpdateAllocationStatus}
             onOpenPersonMonth={handleOpenPersonMonth}
             onOpenAssignModalForPerson={(personId) =>
               setAssignModalState({ isOpen: true, personId })
@@ -1109,6 +1166,7 @@ export function App() {
           project={activeEditorData.project}
           monthIndex={activeEditorData.monthIndex}
           currentPercentage={activeEditorData.currentPercentage}
+          currentStatus={activeEditorData.currentStatus}
           personMonthlyTotalOtherProjects={activeEditorData.otherAllocsSum}
           projects={projects}
           clients={clients}

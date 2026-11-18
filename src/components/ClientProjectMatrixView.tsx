@@ -6,6 +6,10 @@ import {
   Project,
   Client,
   Allocation,
+  AllocationStatus,
+  ALLOCATION_STATUSES,
+  ALLOCATION_STATUS_CONFIG,
+  getNextAllocationStatus,
   LeaveEntry,
   EmploymentType,
   EMPLOYMENT_BADGE_CONFIG,
@@ -24,6 +28,11 @@ interface ClientProjectMatrixViewProps {
   expandedProjectIds: Set<string>;
   onToggleProjectExpand: (projectId: string) => void;
   onOpenCellEditor: (personId: string, projectId: string, monthIndex: number) => void;
+  onUpdateAllocationStatus?: (
+    allocationId: string,
+    monthIndex: number,
+    nextStatus: AllocationStatus
+  ) => void;
   onOpenAssignModalForProject: (projectId: string) => void;
   onDeleteAllocation: (allocationId: string) => void;
   onEditClient?: (client: Client) => void;
@@ -47,6 +56,7 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
   expandedProjectIds,
   onToggleProjectExpand,
   onOpenCellEditor,
+  onUpdateAllocationStatus,
   onOpenAssignModalForProject,
   onDeleteAllocation,
   onEditClient,
@@ -82,11 +92,35 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
     .filter((group) => group.projects.length > 0);
 
   return (
-    <div className="w-full flex-1 min-h-0 overflow-auto bg-slate-100 dark:bg-slate-900 border-b border-slate-300 dark:border-slate-800 shadow-xs">
-      <table
-        className="w-full text-left border-collapse"
-        style={{ minWidth: `${540 + visibleMonthCount * 72}px` }}
-      >
+    <div className="w-full flex-1 min-h-0 flex flex-col bg-slate-100 dark:bg-slate-900 border-b border-slate-300 dark:border-slate-800 shadow-xs">
+      <div className="px-4 py-1.5 bg-slate-100 dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-600 dark:text-slate-300">
+            Allocation Month Status:
+          </span>
+          {ALLOCATION_STATUSES.map((st) => {
+            const cfg = ALLOCATION_STATUS_CONFIG[st];
+            return (
+              <span
+                key={st}
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-medium ${cfg.cellBg} ${cfg.cellText} border-slate-300/70 dark:border-slate-700/70`}
+              >
+                <span className={`w-2 h-2 rounded-full ${cfg.dotClass}`} />
+                <span>{cfg.label}</span>
+              </span>
+            );
+          })}
+        </div>
+        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+          Click any cell to edit % & status · Click the status label inside a cell to cycle
+        </span>
+      </div>
+
+      <div className="w-full flex-1 min-h-0 overflow-auto">
+        <table
+          className="w-full text-left border-collapse"
+          style={{ minWidth: `${540 + visibleMonthCount * 72}px` }}
+        >
         <thead>
           <tr className="bg-slate-200/90 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border-b border-slate-300 dark:border-slate-800 sticky top-0 z-20">
             <th className="py-2.5 px-4 w-[320px] min-w-[320px] sticky left-0 z-30 bg-slate-200 dark:bg-slate-800 border-r border-slate-300 dark:border-slate-800">
@@ -377,6 +411,10 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
                                 const effCap = personCapacity.effectiveCapacities[monthIdx];
                                 const isGlobalOverbooked = personMonthTotal > effCap;
                                 const monthLeaves = personCapacity.monthLeaves[monthIdx];
+                                const cellStatus: AllocationStatus =
+                                  alloc.monthlyStatus?.[monthIdx] || 'unknown';
+                                const statusCfg = ALLOCATION_STATUS_CONFIG[cellStatus];
+                                const nextStatus = getNextAllocationStatus(cellStatus);
 
                                 return (
                                   <td
@@ -384,32 +422,51 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
                                     onClick={() =>
                                       onOpenCellEditor(person.id, project.id, monthIdx)
                                     }
-                                    className={`p-1 text-center font-mono tabular-nums border-r border-slate-200/50 dark:border-slate-800/50 last:border-r-0 cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/50 hover:bg-blue-50/40 dark:hover:bg-blue-950/40 ${
+                                    className={`p-1 text-center font-mono tabular-nums border-r border-slate-200/70 dark:border-slate-800/70 last:border-r-0 cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/60 ${statusCfg.cellBg} ${
                                       isGlobalOverbooked && pct > 0
-                                        ? 'bg-rose-50/70 dark:bg-rose-950/30'
-                                        : monthLeaves.length > 0 && pct > 0
-                                        ? 'bg-purple-50/60 dark:bg-purple-950/30'
+                                        ? 'ring-1 ring-inset ring-rose-500/80'
                                         : ''
                                     }`}
-                                    title={`Click to edit ${person.name}'s allocation (${pct}%). Available capacity: ${effCap}%, Total workload: ${personMonthTotal}%.`}
+                                    title={`Click to edit ${person.name}'s ${MONTH_NAMES[monthIdx]} allocation (${pct}%, Status: ${statusCfg.label}). Available capacity: ${effCap}%, Total workload: ${personMonthTotal}%.`}
                                   >
-                                    <div className="py-1 flex flex-col items-center justify-center">
+                                    <div className="py-0.5 flex flex-col items-center justify-center gap-0.5">
                                       <span
-                                        className={`text-[11px] font-medium ${
-                                          pct > 0
-                                            ? 'text-slate-800 dark:text-slate-200'
-                                            : 'text-slate-300 dark:text-slate-600'
+                                        className={`text-[11px] font-semibold ${statusCfg.cellText} ${
+                                          pct > 0 ? '' : 'opacity-60'
                                         }`}
                                       >
                                         {pct > 0 ? `${pct}%` : '—'}
                                       </span>
+                                      {onUpdateAllocationStatus ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onUpdateAllocationStatus(
+                                              alloc.id,
+                                              monthIdx,
+                                              nextStatus
+                                            );
+                                          }}
+                                          title={`Status: ${statusCfg.label} — Click to change to ${ALLOCATION_STATUS_CONFIG[nextStatus].label}`}
+                                          className="inline-flex items-center gap-1 px-1 py-0.2 rounded text-[8px] font-sans font-medium bg-white/80 dark:bg-black/35 text-slate-800 dark:text-white/95 hover:bg-white dark:hover:bg-black/55 border border-black/10 dark:border-white/20 cursor-pointer transition-colors"
+                                        >
+                                          <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotClass}`} />
+                                          <span>{statusCfg.shortLabel}</span>
+                                        </button>
+                                      ) : (
+                                        <span className={`inline-flex items-center gap-1 text-[8px] font-sans ${statusCfg.cellText}`}>
+                                          <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotClass}`} />
+                                          <span>{statusCfg.shortLabel}</span>
+                                        </span>
+                                      )}
                                       {isGlobalOverbooked && pct > 0 && (
-                                        <span className="text-[8px] font-bold text-rose-600 dark:text-rose-400">
+                                        <span className="text-[8px] font-bold text-rose-700 dark:text-rose-200 bg-rose-100/80 dark:bg-rose-950/75 px-1 rounded">
                                           {personMonthTotal}% ttl
                                         </span>
                                       )}
                                       {monthLeaves.length > 0 && pct > 0 && (
-                                        <span className="text-[8px] font-semibold text-purple-600 dark:text-purple-400">
+                                        <span className="text-[8px] font-semibold text-purple-700 dark:text-purple-200 bg-purple-100/80 dark:bg-purple-950/75 px-1 rounded">
                                           on leave
                                         </span>
                                       )}
@@ -445,6 +502,7 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

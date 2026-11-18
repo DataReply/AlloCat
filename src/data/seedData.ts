@@ -3,11 +3,13 @@ import {
   Client,
   Project,
   Allocation,
+  AllocationStatus,
   LeaveEntry,
   LeaveType,
   LeaveTypeMeta,
   DEFAULT_LEAVE_TYPE_CONFIG,
-  syncLeaveTypeConfigRegistry
+  syncLeaveTypeConfigRegistry,
+  normalizeAllocationStatuses
 } from '../types';
 
 export const INITIAL_PEOPLE: Person[] = [
@@ -274,139 +276,162 @@ export const INITIAL_PROJECTS: Project[] = [
   }
 ];
 
+const C: AllocationStatus = 'confirmed';
+const P: AllocationStatus = 'planned';
+const U: AllocationStatus = 'unknown';
+
 export const INITIAL_ALLOCATIONS: Allocation[] = [
   {
     id: 'a-1',
     personId: 'p-1',
     projectId: 'proj-1',
     year: 2026,
-    monthlyPercentage: [60, 60, 60, 60, 50, 50, 40, 40, 40, 40, 30, 30]
+    monthlyPercentage: [60, 60, 60, 60, 50, 50, 40, 40, 40, 40, 30, 30],
+    monthlyStatus: [C, C, C, C, C, C, P, P, P, P, U, U]
   },
   {
     id: 'a-2',
     personId: 'p-1',
     projectId: 'proj-6',
     year: 2026,
-    monthlyPercentage: [40, 40, 60, 60, 50, 50, 40, 40, 0, 0, 0, 0]
+    monthlyPercentage: [40, 40, 60, 60, 50, 50, 40, 40, 0, 0, 0, 0],
+    monthlyStatus: [C, C, C, C, P, P, P, P, U, U, U, U]
   },
   {
     id: 'a-3',
     personId: 'p-2',
     projectId: 'proj-2',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 0, 0],
+    monthlyStatus: [C, C, C, C, C, C, U, U, U, U, U, U]
   },
   {
     id: 'a-4',
     personId: 'p-2',
     projectId: 'proj-7',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 100, 100]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 0, 0, 0, 0, 100, 100],
+    monthlyStatus: [C, C, C, P, P, P, U, U, U, U, P, P]
   },
   {
     id: 'a-5',
     personId: 'p-3',
     projectId: 'proj-1',
     year: 2026,
-    monthlyPercentage: [100, 100, 100, 100, 80, 80, 50, 50, 0, 0, 0, 0]
+    monthlyPercentage: [100, 100, 100, 100, 80, 80, 50, 50, 0, 0, 0, 0],
+    monthlyStatus: [C, C, C, C, C, C, P, P, U, U, U, U]
   },
   {
     id: 'a-6',
     personId: 'p-3',
     projectId: 'proj-5',
     year: 2026,
-    monthlyPercentage: [0, 0, 0, 0, 20, 20, 50, 50, 100, 100, 100, 100]
+    monthlyPercentage: [0, 0, 0, 0, 20, 20, 50, 50, 100, 100, 100, 100],
+    monthlyStatus: [U, U, U, U, P, P, P, P, P, P, U, U]
   },
   {
     id: 'a-7',
     personId: 'p-4',
     projectId: 'proj-3',
     year: 2026,
-    monthlyPercentage: [60, 60, 60, 60, 60, 60, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [60, 60, 60, 60, 60, 60, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [C, C, C, C, C, C, C, C, P, P, P, U]
   },
   {
     id: 'a-8',
     personId: 'p-4',
     projectId: 'proj-2',
     year: 2026,
-    monthlyPercentage: [40, 40, 40, 40, 40, 40, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [40, 40, 40, 40, 40, 40, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [C, C, C, C, P, P, P, P, P, U, U, U]
   },
   {
     id: 'a-9',
     personId: 'p-5',
     projectId: 'proj-2',
     year: 2026,
-    monthlyPercentage: [80, 80, 80, 80, 70, 70, 50, 50, 50, 50, 0, 50]
+    monthlyPercentage: [80, 80, 80, 80, 70, 70, 50, 50, 50, 50, 0, 50],
+    monthlyStatus: [C, C, C, C, C, C, P, P, P, P, U, P]
   },
   {
     id: 'a-10',
     personId: 'p-5',
     projectId: 'proj-7',
     year: 2026,
-    monthlyPercentage: [20, 20, 30, 30, 40, 40, 50, 50, 50, 50, 0, 50]
+    monthlyPercentage: [20, 20, 30, 30, 40, 40, 50, 50, 50, 50, 0, 50],
+    monthlyStatus: [C, C, C, P, P, P, P, P, U, U, U, U]
   },
   {
     id: 'a-11',
     personId: 'p-6',
     projectId: 'proj-3',
     year: 2026,
-    monthlyPercentage: [80, 80, 75, 75, 50, 50, 0, 0, 0, 0, 0, 0]
+    monthlyPercentage: [80, 80, 75, 75, 50, 50, 0, 0, 0, 0, 0, 0],
+    monthlyStatus: [C, C, C, C, C, P, U, U, U, U, U, U]
   },
   {
     id: 'a-12',
     personId: 'p-6',
     projectId: 'proj-7',
     year: 2026,
-    monthlyPercentage: [0, 0, 25, 25, 50, 50, 50, 50, 80, 80, 80, 80]
+    monthlyPercentage: [0, 0, 25, 25, 50, 50, 50, 50, 80, 80, 80, 80],
+    monthlyStatus: [U, U, C, C, C, C, P, P, P, P, P, U]
   },
   {
     id: 'a-13',
     personId: 'p-7',
     projectId: 'proj-5',
     year: 2026,
-    monthlyPercentage: [70, 70, 70, 70, 70, 70, 60, 60, 60, 60, 60, 60]
+    monthlyPercentage: [70, 70, 70, 70, 70, 70, 60, 60, 60, 60, 60, 60],
+    monthlyStatus: [C, C, C, C, C, C, C, C, P, P, P, P]
   },
   {
     id: 'a-14',
     personId: 'p-7',
     projectId: 'proj-6',
     year: 2026,
-    monthlyPercentage: [30, 30, 30, 30, 30, 30, 40, 40, 40, 40, 40, 40]
+    monthlyPercentage: [30, 30, 30, 30, 30, 30, 40, 40, 40, 40, 40, 40],
+    monthlyStatus: [C, C, C, P, P, P, P, P, U, U, U, U]
   },
   {
     id: 'a-15',
     personId: 'p-8',
     projectId: 'proj-3',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [C, C, C, C, C, C, P, P, P, P, U, U]
   },
   {
     id: 'a-16',
     personId: 'p-8',
     projectId: 'proj-4',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [P, P, P, P, P, P, P, P, U, U, U, U]
   },
   {
     id: 'a-17',
     personId: 'p-9',
     projectId: 'proj-8',
     year: 2026,
-    monthlyPercentage: [100, 100, 100, 100, 100, 100, 90, 90, 80, 80, 80, 80]
+    monthlyPercentage: [100, 100, 100, 100, 100, 100, 90, 90, 80, 80, 80, 80],
+    monthlyStatus: [C, C, C, C, C, C, C, C, P, P, P, P]
   },
   {
     id: 'a-18',
     personId: 'p-10',
     projectId: 'proj-5',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [C, C, C, C, C, C, P, P, P, P, U, U]
   },
   {
     id: 'a-19',
     personId: 'p-10',
     projectId: 'proj-6',
     year: 2026,
-    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50]
+    monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 50],
+    monthlyStatus: [C, C, C, C, P, P, P, P, U, U, U, U]
   }
 ];
 
@@ -563,11 +588,19 @@ export function normalizeAppStatePayload(parsed: Partial<AppState> | null | unde
 
   syncLeaveTypeConfigRegistry(leaveTypes);
 
+  const loadedAllocations: Allocation[] = parsed.allocations.map((a: Allocation) => ({
+    ...a,
+    monthlyPercentage: Array.from({ length: 12 }, (_, idx) =>
+      Math.max(0, Math.round(Number(a.monthlyPercentage?.[idx] ?? 0)))
+    ),
+    monthlyStatus: normalizeAllocationStatuses(a.monthlyStatus, 'unknown')
+  }));
+
   return {
     people: loadedPeople,
     clients: parsed.clients,
     projects: loadedProjects,
-    allocations: parsed.allocations,
+    allocations: loadedAllocations,
     leaves: Array.isArray(parsed.leaves) ? parsed.leaves : INITIAL_LEAVES,
     availableYears: years,
     selectedYear:

@@ -8,7 +8,17 @@ import {
   Layers,
   Calendar
 } from 'lucide-react';
-import { MONTH_FULL_NAMES, Person, Project, Client, Allocation, LeaveEntry } from '../types';
+import {
+  MONTH_FULL_NAMES,
+  Person,
+  Project,
+  Client,
+  Allocation,
+  AllocationStatus,
+  ALLOCATION_STATUSES,
+  ALLOCATION_STATUS_CONFIG,
+  LeaveEntry
+} from '../types';
 
 interface CellAllocationPopoverProps {
   isOpen: boolean;
@@ -17,13 +27,18 @@ interface CellAllocationPopoverProps {
   project: Project;
   monthIndex: number;
   currentPercentage: number;
+  currentStatus?: AllocationStatus;
   personMonthlyTotalOtherProjects: number;
   projects?: Project[];
   clients?: Client[];
   allocations?: Allocation[];
   leaves?: LeaveEntry[];
   selectedYear?: number;
-  onSave: (newPercentage: number, fillOptions?: { applyToAllRemaining?: boolean; applyToAllYear?: boolean }) => void;
+  onSave: (
+    newPercentage: number,
+    newStatus: AllocationStatus,
+    fillOptions?: { applyToAllRemaining?: boolean; applyToAllYear?: boolean }
+  ) => void;
   onDeleteAllocation?: () => void;
   onSwitchProject?: (projectId: string) => void;
 }
@@ -35,6 +50,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
   project,
   monthIndex,
   currentPercentage,
+  currentStatus = 'unknown',
   projects = [],
   clients = [],
   allocations = [],
@@ -45,12 +61,14 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
   onSwitchProject
 }) => {
   const [percentage, setPercentage] = useState<number>(currentPercentage);
+  const [status, setStatus] = useState<AllocationStatus>(currentStatus);
   const [fillMode, setFillMode] = useState<'single' | 'remaining' | 'year'>('single');
 
   useEffect(() => {
     setPercentage(currentPercentage);
+    setStatus(currentStatus);
     setFillMode('single');
-  }, [currentPercentage, monthIndex, person.id, project.id, isOpen]);
+  }, [currentPercentage, currentStatus, monthIndex, person.id, project.id, isOpen]);
 
   const activeLeavesInMonth = useMemo(() => {
     return leaves.filter((l) => {
@@ -77,6 +95,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
       clientName: string;
       isBillable: boolean;
       percentage: number;
+      status: AllocationStatus;
       isCurrent: boolean;
       notes?: string;
     }> = [];
@@ -92,6 +111,9 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
 
       const client = clients.find((c) => c.id === proj.clientId);
       const allocatedPct = isCurrent ? percentage : (alloc.monthlyPercentage[monthIndex] || 0);
+      const allocatedStatus: AllocationStatus = isCurrent
+        ? status
+        : (alloc.monthlyStatus?.[monthIndex] || 'unknown');
 
       if (isCurrent || allocatedPct > 0) {
         list.push({
@@ -102,6 +124,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
           clientName: client?.name || 'Internal',
           isBillable: proj.billable,
           percentage: allocatedPct,
+          status: allocatedStatus,
           isCurrent,
           notes: alloc.notes || proj.notes
         });
@@ -118,6 +141,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
         clientName: client?.name || 'Internal',
         isBillable: project.billable,
         percentage: percentage,
+        status,
         isCurrent: true,
         notes: project.notes
       });
@@ -128,7 +152,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
       if (b.isCurrent) return 1;
       return b.percentage - a.percentage;
     });
-  }, [allocations, projects, clients, person.id, project, monthIndex, selectedYear, percentage]);
+  }, [allocations, projects, clients, person.id, project, monthIndex, selectedYear, percentage, status]);
 
   if (!isOpen) return null;
 
@@ -144,7 +168,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
   const presets = [0, 25, 50, 75, 100];
 
   const handleApply = () => {
-    onSave(percentage, {
+    onSave(percentage, status, {
       applyToAllRemaining: fillMode === 'remaining',
       applyToAllYear: fillMode === 'year'
     });
@@ -219,7 +243,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
                 key={val}
                 type="button"
                 onClick={() => setPercentage(val)}
-                className={`py-1 text-xs font-mono font-medium rounded-md border transition-all ${
+                className={`py-1 text-xs font-mono font-medium rounded-md border transition-all cursor-pointer ${
                   percentage === val
                     ? 'bg-blue-600 border-blue-600 text-white font-bold shadow-xs'
                     : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
@@ -228,6 +252,41 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
                 {val}%
               </button>
             ))}
+          </div>
+
+          <div className="pt-2 border-t border-slate-200/70 dark:border-slate-700/70 space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Month Status
+              </label>
+              <span
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[10px] font-semibold rounded border ${ALLOCATION_STATUS_CONFIG[status].badgeClass}`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${ALLOCATION_STATUS_CONFIG[status].dotClass}`} />
+                {ALLOCATION_STATUS_CONFIG[status].label}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {ALLOCATION_STATUSES.map((st) => {
+                const cfg = ALLOCATION_STATUS_CONFIG[st];
+                const isSelected = status === st;
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatus(st)}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 px-2 text-xs rounded-md border transition-all cursor-pointer ${
+                      isSelected
+                        ? `${cfg.buttonActiveClass} shadow-xs`
+                        : `${cfg.cellBg} ${cfg.cellText} border-slate-300 dark:border-slate-600/80 hover:brightness-95 dark:hover:brightness-110`
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'bg-current opacity-85' : cfg.dotClass}`} />
+                    <span>{cfg.label}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
 
@@ -363,7 +422,14 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span
+                      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border ${ALLOCATION_STATUS_CONFIG[item.status].badgeClass}`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${ALLOCATION_STATUS_CONFIG[item.status].dotClass}`} />
+                      <span>{ALLOCATION_STATUS_CONFIG[item.status].label}</span>
+                    </span>
+
                     <span className={`font-mono font-bold text-xs tabular-nums px-2 py-0.5 rounded-md ${
                       item.isCurrent
                         ? 'bg-blue-600 text-white font-bold'
@@ -436,7 +502,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
         {/* Batch Fill options */}
         <div className="space-y-1.5 pt-0.5">
           <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-            Apply {percentage}% across timeline:
+            Apply {percentage}% ({ALLOCATION_STATUS_CONFIG[status].label}) across timeline:
           </label>
           <div className="grid grid-cols-3 gap-1.5 text-xs">
             <button

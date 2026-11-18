@@ -84,7 +84,7 @@ const VIEW_SCOPE_TABS: Array<{
     description:
       'Complete relational export & import across planning_years, departments, leave_types, clients, projects, people, allocations, and leaves with preserved PK/FK IDs.',
     csvColumnsHint:
-      'table_name, id, year, is_selected, sort_order, person_id, first_name, last_name, full_name, role, department, employment_type, max_capacity_percent, client_id, client_name, project_id, project_name, code, billable, jan..dec, leave_type, start_month (0..11), end_month (0..11), impact_percent, notes',
+      'table_name, id, year, is_selected, sort_order, person_id, first_name, last_name, full_name, role, department, employment_type, max_capacity_percent, client_id, client_name, project_id, project_name, code, billable, jan..dec, jan_status..dec_status, leave_type, start_month (0..11), end_month (0..11), impact_percent, notes',
     icon: Layers
   },
   {
@@ -94,7 +94,7 @@ const VIEW_SCOPE_TABS: Array<{
     description:
       'Client portfolios, project_summary totals, and staff allocation rows keyed by client_id, project_id, and person_id.',
     csvColumnsHint:
-      'table_name, id, year, client_id, client_name, industry, project_id, project_name, code, project_status, billable (1/0), person_id, first_name, last_name, full_name, role, department, employment_type, annual_avg_pct, jan..dec, notes',
+      'table_name, id, year, client_id, client_name, industry, project_id, project_name, code, project_status, billable (1/0), person_id, first_name, last_name, full_name, role, department, employment_type, annual_avg_pct, jan..dec, jan_status..dec_status, notes',
     icon: Briefcase
   },
   {
@@ -104,7 +104,7 @@ const VIEW_SCOPE_TABS: Array<{
     description:
       'Person capacity summaries alongside monthly allocation rows keyed by person_id and project_id.',
     csvColumnsHint:
-      'table_name, id, year, person_id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, client_id, client_name, project_id, project_name, code, annual_avg_pct, jan..dec, notes',
+      'table_name, id, year, person_id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, client_id, client_name, project_id, project_name, code, annual_avg_pct, jan..dec, jan_status..dec_status, notes',
     icon: Users
   },
   {

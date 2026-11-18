@@ -5,12 +5,15 @@ import {
   Project,
   ProjectStatus,
   Allocation,
+  AllocationStatus,
   LeaveEntry,
   LeaveType,
   LeaveTypeMeta,
   EmploymentType,
   DEFAULT_LEAVE_TYPE_CONFIG,
-  syncLeaveTypeConfigRegistry
+  syncLeaveTypeConfigRegistry,
+  normalizeAllocationStatus,
+  normalizeAllocationStatuses
 } from '../types';
 import {
   AppState,
@@ -150,6 +153,18 @@ CREATE TABLE IF NOT EXISTS allocations (
   oct INTEGER NOT NULL DEFAULT 0,
   nov INTEGER NOT NULL DEFAULT 0,
   dec INTEGER NOT NULL DEFAULT 0,
+  jan_status TEXT NOT NULL DEFAULT 'unknown' CHECK (jan_status IN ('unknown', 'planned', 'confirmed')),
+  feb_status TEXT NOT NULL DEFAULT 'unknown' CHECK (feb_status IN ('unknown', 'planned', 'confirmed')),
+  mar_status TEXT NOT NULL DEFAULT 'unknown' CHECK (mar_status IN ('unknown', 'planned', 'confirmed')),
+  apr_status TEXT NOT NULL DEFAULT 'unknown' CHECK (apr_status IN ('unknown', 'planned', 'confirmed')),
+  may_status TEXT NOT NULL DEFAULT 'unknown' CHECK (may_status IN ('unknown', 'planned', 'confirmed')),
+  jun_status TEXT NOT NULL DEFAULT 'unknown' CHECK (jun_status IN ('unknown', 'planned', 'confirmed')),
+  jul_status TEXT NOT NULL DEFAULT 'unknown' CHECK (jul_status IN ('unknown', 'planned', 'confirmed')),
+  aug_status TEXT NOT NULL DEFAULT 'unknown' CHECK (aug_status IN ('unknown', 'planned', 'confirmed')),
+  sep_status TEXT NOT NULL DEFAULT 'unknown' CHECK (sep_status IN ('unknown', 'planned', 'confirmed')),
+  oct_status TEXT NOT NULL DEFAULT 'unknown' CHECK (oct_status IN ('unknown', 'planned', 'confirmed')),
+  nov_status TEXT NOT NULL DEFAULT 'unknown' CHECK (nov_status IN ('unknown', 'planned', 'confirmed')),
+  dec_status TEXT NOT NULL DEFAULT 'unknown' CHECK (dec_status IN ('unknown', 'planned', 'confirmed')),
   notes TEXT NOT NULL DEFAULT '',
   UNIQUE(person_id, project_id, year)
 );
@@ -185,6 +200,8 @@ SELECT
   pr.name AS project_name,
   a.jan, a.feb, a.mar, a.apr, a.may, a.jun,
   a.jul, a.aug, a.sep, a.oct, a.nov, a.dec,
+  a.jan_status, a.feb_status, a.mar_status, a.apr_status, a.may_status, a.jun_status,
+  a.jul_status, a.aug_status, a.sep_status, a.oct_status, a.nov_status, a.dec_status,
   ROUND((a.jan + a.feb + a.mar + a.apr + a.may + a.jun + a.jul + a.aug + a.sep + a.oct + a.nov + a.dec) / 12.0, 1) AS annual_avg_pct
 FROM allocations a
 JOIN people p ON p.id = a.person_id
@@ -440,8 +457,64 @@ export function isSQLiteBinaryHeader(bytes: Uint8Array): boolean {
   return true;
 }
 
+const DB_STATUS_COLUMNS = [
+  'jan_status',
+  'feb_status',
+  'mar_status',
+  'apr_status',
+  'may_status',
+  'jun_status',
+  'jul_status',
+  'aug_status',
+  'sep_status',
+  'oct_status',
+  'nov_status',
+  'dec_status'
+] as const;
+
 function ensureSchema(db: SqlJsDatabase): void {
   db.run(SQLITE_RELATIONAL_SCHEMA_DDL);
+
+  const allocCols = new Set(
+    queryRows(db, 'PRAGMA table_info(allocations);').map((r) => String(r.name || ''))
+  );
+  let migratedColumns = false;
+  for (const statusCol of DB_STATUS_COLUMNS) {
+    if (!allocCols.has(statusCol)) {
+      db.run(
+        `ALTER TABLE allocations ADD COLUMN ${statusCol} TEXT NOT NULL DEFAULT 'unknown';`
+      );
+      migratedColumns = true;
+    }
+  }
+
+  const viewCols = new Set(
+    queryRows(db, 'PRAGMA table_info(v_allocation_months);').map((r) => String(r.name || ''))
+  );
+  if (migratedColumns || !viewCols.has('jan_status')) {
+    db.run('DROP VIEW IF EXISTS v_allocation_months;');
+    db.run(`CREATE VIEW v_allocation_months AS
+      SELECT
+        a.id AS allocation_id,
+        a.year,
+        p.id AS person_id,
+        p.full_name AS person_name,
+        p.department,
+        p.employment_type,
+        c.name AS client_name,
+        pr.id AS project_id,
+        pr.code AS project_code,
+        pr.name AS project_name,
+        a.jan, a.feb, a.mar, a.apr, a.may, a.jun,
+        a.jul, a.aug, a.sep, a.oct, a.nov, a.dec,
+        a.jan_status, a.feb_status, a.mar_status, a.apr_status, a.may_status, a.jun_status,
+        a.jul_status, a.aug_status, a.sep_status, a.oct_status, a.nov_status, a.dec_status,
+        ROUND((a.jan + a.feb + a.mar + a.apr + a.may + a.jun + a.jul + a.aug + a.sep + a.oct + a.nov + a.dec) / 12.0, 1) AS annual_avg_pct
+      FROM allocations a
+      JOIN people p ON p.id = a.person_id
+      JOIN projects pr ON pr.id = a.project_id
+      JOIN clients c ON c.id = pr.client_id;`);
+  }
 }
 
 function normalizeMonthsArray(raw: unknown[]): number[] {
@@ -502,7 +575,7 @@ function writeStateIntoDb(
 
     db.run(
       'INSERT INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?);',
-      ['schema_version', '2', now]
+      ['schema_version', '3', now]
     );
     db.run(
       'INSERT INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?);',
@@ -622,11 +695,15 @@ function writeStateIntoDb(
     for (const alloc of state.allocations) {
       if (!personIds.has(alloc.personId) || !projectIds.has(alloc.projectId)) continue;
       const m = normalizeMonthsArray(alloc.monthlyPercentage || []);
+      const s: AllocationStatus[] = normalizeAllocationStatuses(alloc.monthlyStatus, 'unknown');
       db.run(
         `INSERT OR REPLACE INTO allocations (
           id, person_id, project_id, year,
-          jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec,
+          jan_status, feb_status, mar_status, apr_status, may_status, jun_status,
+          jul_status, aug_status, sep_status, oct_status, nov_status, dec_status,
+          notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           alloc.id,
           alloc.personId,
@@ -644,6 +721,18 @@ function writeStateIntoDb(
           m[9],
           m[10],
           m[11],
+          s[0],
+          s[1],
+          s[2],
+          s[3],
+          s[4],
+          s[5],
+          s[6],
+          s[7],
+          s[8],
+          s[9],
+          s[10],
+          s[11],
           alloc.notes || ''
         ]
       );
@@ -829,6 +918,20 @@ function readAppStateFromDb(db: SqlJsDatabase): AppState | null {
       Number(r.oct ?? 0),
       Number(r.nov ?? 0),
       Number(r.dec ?? 0)
+    ],
+    monthlyStatus: [
+      normalizeAllocationStatus(r.jan_status),
+      normalizeAllocationStatus(r.feb_status),
+      normalizeAllocationStatus(r.mar_status),
+      normalizeAllocationStatus(r.apr_status),
+      normalizeAllocationStatus(r.may_status),
+      normalizeAllocationStatus(r.jun_status),
+      normalizeAllocationStatus(r.jul_status),
+      normalizeAllocationStatus(r.aug_status),
+      normalizeAllocationStatus(r.sep_status),
+      normalizeAllocationStatus(r.oct_status),
+      normalizeAllocationStatus(r.nov_status),
+      normalizeAllocationStatus(r.dec_status)
     ],
     notes: String(r.notes || '')
   }));
@@ -1098,7 +1201,7 @@ export function exportSQLDumpScript(state: AppState): string {
   lines.push('');
 
   lines.push(
-    `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('schema_version')}, ${sqlLiteral('2')}, ${sqlLiteral(exportedAt)});`
+    `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('schema_version')}, ${sqlLiteral('3')}, ${sqlLiteral(exportedAt)});`
   );
   lines.push(
     `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('exported_at')}, ${sqlLiteral(exportedAt)}, ${sqlLiteral(exportedAt)});`
@@ -1198,12 +1301,13 @@ export function exportSQLDumpScript(state: AppState): string {
   for (const a of state.allocations) {
     if (!personIds.has(a.personId) || !projectIds.has(a.projectId)) continue;
     const m = normalizeMonthsArray(a.monthlyPercentage || []);
+    const s = normalizeAllocationStatuses(a.monthlyStatus, 'unknown').map((st) => sqlLiteral(st));
     lines.push(
-      `INSERT OR REPLACE INTO allocations (id, person_id, project_id, year, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec, notes) VALUES (${sqlLiteral(
+      `INSERT OR REPLACE INTO allocations (id, person_id, project_id, year, jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec, jan_status, feb_status, mar_status, apr_status, may_status, jun_status, jul_status, aug_status, sep_status, oct_status, nov_status, dec_status, notes) VALUES (${sqlLiteral(
         a.id
       )}, ${sqlLiteral(a.personId)}, ${sqlLiteral(a.projectId)}, ${a.year}, ${m.join(
         ', '
-      )}, ${sqlLiteral(a.notes || '')});`
+      )}, ${s.join(', ')}, ${sqlLiteral(a.notes || '')});`
     );
   }
   lines.push('');

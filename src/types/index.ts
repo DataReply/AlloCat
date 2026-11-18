@@ -63,12 +63,95 @@ export interface Project {
   notes?: string; // Comments / deliverable scope notes
 }
 
+export type AllocationStatus = 'unknown' | 'planned' | 'confirmed';
+
+export const ALLOCATION_STATUSES: AllocationStatus[] = [
+  'unknown',
+  'planned',
+  'confirmed'
+];
+
+export const ALLOCATION_STATUS_CONFIG: Record<
+  AllocationStatus,
+  {
+    label: string;
+    shortLabel: string;
+    cellBg: string;
+    cellText: string;
+    badgeClass: string;
+    dotClass: string;
+    buttonActiveClass: string;
+  }
+> = {
+  unknown: {
+    label: 'Unknown',
+    shortLabel: 'Unk',
+    cellBg: 'bg-slate-200/90 dark:bg-[#3b4048]',
+    cellText: 'text-slate-800 dark:text-slate-100',
+    badgeClass:
+      'bg-slate-200 text-slate-700 border-slate-300 dark:bg-[#3b4048] dark:text-slate-100 dark:border-slate-500/70',
+    dotClass: 'bg-slate-500 dark:bg-slate-300',
+    buttonActiveClass:
+      'bg-slate-600 text-white border-slate-600 dark:bg-slate-500 dark:border-slate-400 font-bold'
+  },
+  planned: {
+    label: 'Planned',
+    shortLabel: 'Plan',
+    cellBg: 'bg-yellow-100/95 dark:bg-[#594d17]',
+    cellText: 'text-yellow-950 dark:text-yellow-100',
+    badgeClass:
+      'bg-yellow-100 text-yellow-900 border-yellow-300 dark:bg-[#594d17] dark:text-yellow-100 dark:border-yellow-500/60',
+    dotClass: 'bg-yellow-500 dark:bg-yellow-400',
+    buttonActiveClass:
+      'bg-yellow-400 text-slate-950 border-yellow-500 font-bold'
+  },
+  confirmed: {
+    label: 'Confirmed',
+    shortLabel: 'Conf',
+    cellBg: 'bg-green-100/95 dark:bg-[#1b5236]',
+    cellText: 'text-green-950 dark:text-green-100',
+    badgeClass:
+      'bg-green-100 text-green-900 border-green-300 dark:bg-[#1b5236] dark:text-green-100 dark:border-emerald-500/60',
+    dotClass: 'bg-green-600 dark:bg-emerald-400',
+    buttonActiveClass:
+      'bg-emerald-600 text-white border-emerald-600 dark:bg-emerald-600 dark:border-emerald-400 font-bold'
+  }
+};
+
+export function normalizeAllocationStatus(
+  raw: unknown,
+  fallback: AllocationStatus = 'unknown'
+): AllocationStatus {
+  if (typeof raw !== 'string') return fallback;
+  const val = raw.trim().toLowerCase();
+  if (val === 'confirmed' || val === 'conf' || val === 'approved') return 'confirmed';
+  if (val === 'planned' || val === 'plan' || val === 'tentative') return 'planned';
+  if (val === 'unknown' || val === 'unk' || val === 'tbd') return 'unknown';
+  return fallback;
+}
+
+export function normalizeAllocationStatuses(
+  raw?: unknown[],
+  fallback: AllocationStatus = 'unknown'
+): AllocationStatus[] {
+  return Array.from({ length: 12 }, (_, idx) =>
+    normalizeAllocationStatus(Array.isArray(raw) ? raw[idx] : undefined, fallback)
+  );
+}
+
+export function getNextAllocationStatus(current: AllocationStatus): AllocationStatus {
+  if (current === 'unknown') return 'planned';
+  if (current === 'planned') return 'confirmed';
+  return 'unknown';
+}
+
 export interface Allocation {
   id: string;
   personId: string;
   projectId: string;
   year: number;
   monthlyPercentage: number[]; // 12 numbers (0..100+) representing Jan through Dec
+  monthlyStatus?: AllocationStatus[]; // 12 statuses ('unknown' | 'planned' | 'confirmed') for Jan through Dec
   notes?: string; // Comments / role detail on this specific assignment
 }
 

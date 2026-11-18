@@ -5,6 +5,7 @@ import {
   Project,
   ProjectStatus,
   Allocation,
+  AllocationStatus,
   LeaveEntry,
   LeaveType,
   LeaveTypeMeta,
@@ -15,7 +16,9 @@ import {
   DEFAULT_LEAVE_TYPE_CONFIG,
   LEAVE_BADGE_THEMES,
   getLeaveTypeMeta,
-  syncLeaveTypeConfigRegistry
+  syncLeaveTypeConfigRegistry,
+  normalizeAllocationStatus,
+  normalizeAllocationStatuses
 } from '../types';
 import { AppState } from '../data/seedData';
 import {
@@ -134,10 +137,22 @@ export const SQLITE_TABLE_SCHEMAS: SQLiteTableSchemaDescriptor[] = [
       'oct',
       'nov',
       'dec',
+      'jan_status',
+      'feb_status',
+      'mar_status',
+      'apr_status',
+      'may_status',
+      'jun_status',
+      'jul_status',
+      'aug_status',
+      'sep_status',
+      'oct_status',
+      'nov_status',
+      'dec_status',
       'notes'
     ],
     description:
-      'Monthly resource assignment fact table uniquely keyed by (person_id, project_id, year) with integer percentages jan..dec.'
+      'Monthly resource assignment fact table uniquely keyed by (person_id, project_id, year) with integer percentages jan..dec and statuses jan_status..dec_status (unknown, planned, confirmed).'
   },
   {
     tableName: 'leaves',
@@ -239,6 +254,21 @@ const DB_MONTH_COLUMNS = [
   'oct',
   'nov',
   'dec'
+] as const;
+
+const DB_STATUS_COLUMNS = [
+  'jan_status',
+  'feb_status',
+  'mar_status',
+  'apr_status',
+  'may_status',
+  'jun_status',
+  'jul_status',
+  'aug_status',
+  'sep_status',
+  'oct_status',
+  'nov_status',
+  'dec_status'
 ] as const;
 
 function getInitials(name: string): string {
@@ -550,7 +580,8 @@ export function generateTableCSV(state: AppState, tableName: SQLiteTableName): s
         const m = Array.from({ length: 12 }, (_, idx) =>
           Math.max(0, Math.round(Number(a.monthlyPercentage?.[idx] ?? 0)))
         );
-        rows.push([a.id, a.personId, a.projectId, a.year, ...m, a.notes || '']);
+        const s = normalizeAllocationStatuses(a.monthlyStatus, 'unknown');
+        rows.push([a.id, a.personId, a.projectId, a.year, ...m, ...s, a.notes || '']);
       }
       break;
     }
@@ -645,6 +676,7 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
     'code',
     'annual_avg_pct',
     ...DB_MONTH_COLUMNS,
+    ...DB_STATUS_COLUMNS,
     'notes'
   ];
 
@@ -680,6 +712,7 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
       '',
       summary.annualAverage,
       ...summary.totals,
+      ...DB_STATUS_COLUMNS.map(() => ''),
       person.notes || ''
     ]);
 
@@ -694,6 +727,7 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
       const months = Array.from({ length: 12 }, (_, i) =>
         Math.max(0, Math.round(Number(alloc.monthlyPercentage?.[i] ?? 0)))
       );
+      const statuses = normalizeAllocationStatuses(alloc.monthlyStatus, 'unknown');
       const avg = Math.round(months.reduce((s, n) => s + n, 0) / 12);
 
       rows.push([
@@ -716,6 +750,7 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
         project.code,
         avg,
         ...months,
+        ...statuses,
         alloc.notes || ''
       ]);
     }
@@ -749,6 +784,7 @@ export function generateClientsViewCSV(state: AppState, projectsSubset?: Project
     'employment_type',
     'annual_avg_pct',
     ...DB_MONTH_COLUMNS,
+    ...DB_STATUS_COLUMNS,
     'notes'
   ];
 
@@ -780,6 +816,7 @@ export function generateClientsViewCSV(state: AppState, projectsSubset?: Project
         '',
         Math.round(summary.avgMonthlyFTE * 100),
         ...summary.totals,
+        ...DB_STATUS_COLUMNS.map(() => ''),
         project.notes || ''
       ]);
 
@@ -794,6 +831,7 @@ export function generateClientsViewCSV(state: AppState, projectsSubset?: Project
         const months = Array.from({ length: 12 }, (_, i) =>
           Math.max(0, Math.round(Number(alloc.monthlyPercentage?.[i] ?? 0)))
         );
+        const statuses = normalizeAllocationStatuses(alloc.monthlyStatus, 'unknown');
         const avg = Math.round(months.reduce((s, n) => s + n, 0) / 12);
 
         rows.push([
@@ -817,6 +855,7 @@ export function generateClientsViewCSV(state: AppState, projectsSubset?: Project
           person.employmentType || 'Internal',
           avg,
           ...months,
+          ...statuses,
           alloc.notes || ''
         ]);
       }
@@ -1229,6 +1268,7 @@ export function generateAllViewsCSV(state: AppState): string {
     'end_month',
     'impact_percent',
     ...DB_MONTH_COLUMNS,
+    ...DB_STATUS_COLUMNS,
     'notes'
   ];
 
@@ -1343,8 +1383,12 @@ export function generateAllViewsCSV(state: AppState): string {
     row[colIdx('project_id')] = project.id;
     row[colIdx('project_name')] = project.name;
     row[colIdx('code')] = project.code;
+    const statuses = normalizeAllocationStatuses(alloc.monthlyStatus, 'unknown');
     DB_MONTH_COLUMNS.forEach((mCol, idx) => {
       row[colIdx(mCol)] = Math.max(0, Math.round(Number(alloc.monthlyPercentage?.[idx] ?? 0)));
+    });
+    DB_STATUS_COLUMNS.forEach((sCol, idx) => {
+      row[colIdx(sCol)] = statuses[idx];
     });
     row[colIdx('notes')] = alloc.notes || '';
     rows.push(row);
@@ -1447,6 +1491,7 @@ function toSQLiteAllocationRecord(a: Allocation) {
   const m = Array.from({ length: 12 }, (_, idx) =>
     Math.max(0, Math.round(Number(a.monthlyPercentage?.[idx] ?? 0)))
   );
+  const s = normalizeAllocationStatuses(a.monthlyStatus, 'unknown');
   return {
     id: a.id,
     person_id: a.personId,
@@ -1464,6 +1509,18 @@ function toSQLiteAllocationRecord(a: Allocation) {
     oct: m[9],
     nov: m[10],
     dec: m[11],
+    jan_status: s[0],
+    feb_status: s[1],
+    mar_status: s[2],
+    apr_status: s[3],
+    may_status: s[4],
+    jun_status: s[5],
+    jul_status: s[6],
+    aug_status: s[7],
+    sep_status: s[8],
+    oct_status: s[9],
+    nov_status: s[10],
+    dec_status: s[11],
     notes: a.notes || ''
   };
 }
@@ -1830,6 +1887,18 @@ export function generateTemplateCSV(
             50,
             50,
             50,
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
             'Frontend Architecture Lead'
           ],
           [
@@ -1849,6 +1918,18 @@ export function generateTemplateCSV(
             50,
             0,
             0,
+            'unknown',
+            'unknown',
+            'confirmed',
+            'confirmed',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
             'UX Design Lead'
           ]
         ]);
@@ -1937,6 +2018,7 @@ export function generateTemplateCSV(
       'code',
       'annual_avg_pct',
       ...DB_MONTH_COLUMNS,
+      ...DB_STATUS_COLUMNS,
       'notes'
     ];
     const exampleRows: (string | number)[][] = includeExampleRows
@@ -1972,6 +2054,18 @@ export function generateTemplateCSV(
             50,
             50,
             50,
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'unknown',
+            'unknown',
             'Frontend Architecture Lead'
           ],
           [
@@ -2005,6 +2099,18 @@ export function generateTemplateCSV(
             25,
             25,
             25,
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
             'Component Library'
           ]
         ]
@@ -2035,6 +2141,7 @@ export function generateTemplateCSV(
       'employment_type',
       'annual_avg_pct',
       ...DB_MONTH_COLUMNS,
+      ...DB_STATUS_COLUMNS,
       'notes'
     ];
     const exampleRows: (string | number)[][] = includeExampleRows
@@ -2071,6 +2178,7 @@ export function generateTemplateCSV(
             100,
             100,
             0,
+            ...DB_STATUS_COLUMNS.map(() => ''),
             'Q2-Q4 Rollout'
           ],
           [
@@ -2105,6 +2213,18 @@ export function generateTemplateCSV(
             100,
             100,
             0,
+            'unknown',
+            'unknown',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'planned',
+            'unknown',
             'UX Lead'
           ]
         ]
@@ -2440,6 +2560,7 @@ export function generateTemplateCSV(
     'end_month',
     'impact_percent',
     ...DB_MONTH_COLUMNS,
+    ...DB_STATUS_COLUMNS,
     'notes'
   ];
   const emptyRow = () => Array<string | number>(headers.length).fill('');
@@ -2519,6 +2640,24 @@ export function generateTemplateCSV(
   rAlloc[colIdx('code')] = 'NGP-01';
   [75, 75, 75, 75, 75, 75, 50, 50, 50, 50, 50, 50].forEach((pct, i) => {
     rAlloc[colIdx(DB_MONTH_COLUMNS[i])] = pct;
+  });
+  (
+    [
+      'confirmed',
+      'confirmed',
+      'confirmed',
+      'confirmed',
+      'confirmed',
+      'confirmed',
+      'planned',
+      'planned',
+      'planned',
+      'planned',
+      'unknown',
+      'unknown'
+    ] as AllocationStatus[]
+  ).forEach((st, i) => {
+    rAlloc[colIdx(DB_STATUS_COLUMNS[i])] = st;
   });
   rAlloc[colIdx('notes')] = 'Tech Lead';
 
@@ -2609,6 +2748,20 @@ export function generateTemplateJSON(
         projectId: 'proj-101',
         year: selectedYear,
         monthlyPercentage: [75, 75, 75, 75, 75, 75, 50, 50, 50, 50, 50, 50],
+        monthlyStatus: [
+          'confirmed',
+          'confirmed',
+          'confirmed',
+          'confirmed',
+          'confirmed',
+          'confirmed',
+          'planned',
+          'planned',
+          'planned',
+          'planned',
+          'unknown',
+          'unknown'
+        ],
         notes: 'Frontend Architecture Lead'
       }
     ],
@@ -3063,6 +3216,22 @@ function importFromJsonContent(
             existing.year === year)
       );
 
+      const hasJsonStatusArray = Array.isArray(alloc.monthlyStatus);
+      const hasJsonStatusCols = DB_STATUS_COLUMNS.some((sCol) => alloc[sCol] !== undefined);
+      const existingStatuses =
+        idx >= 0
+          ? normalizeAllocationStatuses(nextAllocations[idx].monthlyStatus, 'unknown')
+          : normalizeAllocationStatuses(undefined, 'unknown');
+      const monthlyStatus: AllocationStatus[] = hasJsonStatusArray
+        ? normalizeAllocationStatuses(alloc.monthlyStatus as unknown[], 'unknown')
+        : hasJsonStatusCols
+        ? DB_STATUS_COLUMNS.map((sCol, mIdx) =>
+            alloc[sCol] !== undefined
+              ? normalizeAllocationStatus(alloc[sCol], existingStatuses[mIdx])
+              : existingStatuses[mIdx]
+          )
+        : existingStatuses;
+
       const normalizedAlloc: Allocation = {
         id:
           idx >= 0
@@ -3072,6 +3241,7 @@ function importFromJsonContent(
         projectId,
         year,
         monthlyPercentage,
+        monthlyStatus,
         notes:
           alloc.notes !== undefined
             ? String(alloc.notes || '') || undefined
@@ -3403,6 +3573,11 @@ function importFromCsvContent(
       (h) => h === short || h === full || h.startsWith(`${short} `)
     );
   });
+
+  const statusIndices: number[] = DB_STATUS_COLUMNS.map((sCol) =>
+    lowerHeaders.findIndex((h) => h === sCol)
+  );
+  const hasStatusColumns = statusIndices.some((colIdx) => colIdx >= 0);
 
   // Determine replace semantics aligned with SQLite tables
   const rowDiscriminators = new Set<string>(
@@ -4116,10 +4291,23 @@ function importFromCsvContent(
             a.year === year)
       );
 
+      const baseStatuses =
+        existingAllocIdx >= 0
+          ? normalizeAllocationStatuses(nextAllocations[existingAllocIdx].monthlyStatus, 'unknown')
+          : normalizeAllocationStatuses(undefined, 'unknown');
+      const monthStatusValues: AllocationStatus[] = hasStatusColumns
+        ? statusIndices.map((colIdx, mIdx) => {
+            if (colIdx < 0) return baseStatuses[mIdx];
+            const raw = getCell(colIdx);
+            return raw ? normalizeAllocationStatus(raw, baseStatuses[mIdx]) : baseStatuses[mIdx];
+          })
+        : baseStatuses;
+
       if (existingAllocIdx >= 0) {
         nextAllocations[existingAllocIdx] = {
           ...nextAllocations[existingAllocIdx],
           monthlyPercentage: monthValues,
+          monthlyStatus: monthStatusValues,
           notes: allocComment || nextAllocations[existingAllocIdx].notes
         };
       } else {
@@ -4129,6 +4317,7 @@ function importFromCsvContent(
           projectId: projectObj.id,
           year,
           monthlyPercentage: monthValues,
+          monthlyStatus: monthStatusValues,
           notes: allocComment || undefined
         });
       }

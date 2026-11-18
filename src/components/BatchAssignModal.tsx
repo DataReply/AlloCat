@@ -1,6 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, CalendarRange, Check } from 'lucide-react';
-import { Person, Project, Client, MONTH_FULL_NAMES } from '../types';
+import {
+  Person,
+  Project,
+  Client,
+  MONTH_FULL_NAMES,
+  AllocationStatus,
+  ALLOCATION_STATUSES,
+  ALLOCATION_STATUS_CONFIG
+} from '../types';
 
 interface BatchAssignModalProps {
   isOpen: boolean;
@@ -18,6 +26,7 @@ interface BatchAssignModalProps {
     startMonth: number,
     endMonth: number,
     percentage: number,
+    status: AllocationStatus,
     notes?: string
   ) => void;
 }
@@ -39,6 +48,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
   const [startMonth, setStartMonth] = useState<number>(defaultMonthIndex ?? 0);
   const [endMonth, setEndMonth] = useState<number>(defaultMonthIndex ?? 11);
   const [percentage, setPercentage] = useState<number>(50);
+  const [status, setStatus] = useState<AllocationStatus>('planned');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -48,6 +58,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
       setStartMonth(defaultMonthIndex ?? 0);
       setEndMonth(defaultMonthIndex !== undefined ? Math.min(11, defaultMonthIndex + 2) : 11);
       setPercentage(50);
+      setStatus('planned');
       setNotes('');
     }
   }, [isOpen, defaultPersonId, defaultProjectId, defaultMonthIndex, people, projects]);
@@ -66,6 +77,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
       Math.min(startMonth, endMonth),
       Math.max(startMonth, endMonth),
       percentage,
+      status,
       notes.trim() || undefined
     );
     onClose();
@@ -192,7 +204,7 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
                   key={val}
                   type="button"
                   onClick={() => setPercentage(val)}
-                  className={`py-1 rounded font-mono border ${
+                  className={`py-1 rounded font-mono border cursor-pointer ${
                     percentage === val
                       ? 'bg-blue-600 text-white border-blue-600 font-bold'
                       : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400'
@@ -201,6 +213,33 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
                   {val}%
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+              Month Status (for selected range)
+            </label>
+            <div className="grid grid-cols-3 gap-1.5">
+              {ALLOCATION_STATUSES.map((st) => {
+                const cfg = ALLOCATION_STATUS_CONFIG[st];
+                const isSelected = status === st;
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    onClick={() => setStatus(st)}
+                    className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border transition-all cursor-pointer ${
+                      isSelected
+                        ? `${cfg.buttonActiveClass} shadow-xs`
+                        : `${cfg.cellBg} ${cfg.cellText} border-slate-300 dark:border-slate-600/80 hover:brightness-95 dark:hover:brightness-110`
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'bg-current opacity-85' : cfg.dotClass}`} />
+                    <span>{cfg.label}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
