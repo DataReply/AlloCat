@@ -12,8 +12,17 @@ import {
   DEFAULT_LEAVE_TYPE_CONFIG,
   syncLeaveTypeConfigRegistry
 } from '../types';
-import { AppState, getDefaultAppState, saveAppState } from '../data/seedData';
+import {
+  AppState,
+  getDefaultAppState,
+  normalizeAppStatePayload
+} from '../data/seedData';
 import { ImportMergeMode } from './importExportUtils';
+
+export interface SQLiteAuthCredentials {
+  username: string;
+  password: string;
+}
 
 export interface SQLiteTableStat {
   tableName: string;
@@ -52,6 +61,9 @@ const SQLITE_IDB_NAME = 'allocat_sqlite_idb';
 const SQLITE_IDB_STORE = 'databases';
 const SQLITE_IDB_KEY = 'workspace.sqlite';
 const SQLITE_B64_KEY = 'allocat_sqlite_b64_v1';
+const LEGACY_STATE_KEY = 'allocat_app_state_v1';
+const LEGACY_V2_KEY = 'staffgrid_app_state_v2';
+const LEGACY_AUTH_KEY = 'allocat_auth_credentials_v1';
 const SQL_WASM_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/';
 
 export const SQLITE_RELATIONAL_SCHEMA_DDL = `PRAGMA foreign_keys = ON;
@@ -59,6 +71,13 @@ export const SQLITE_RELATIONAL_SCHEMA_DDL = `PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS workspace_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS auth_users (
+  username TEXT PRIMARY KEY,
+  password TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin',
   updated_at TEXT NOT NULL
 );
 
@@ -358,6 +377,60 @@ function writeBinaryToLocalStorage(bytes: Uint8Array): boolean {
   }
 }
 
+function readAndNormalizeLegacyState(): { state: AppState; migratedFrom?: string } {
+  try {
+    const rawV1 = localStorage.getItem(LEGACY_STATE_KEY);
+    const rawV2 = localStorage.getItem(LEGACY_V2_KEY);
+    const raw = rawV1 || rawV2;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const normalized = normalizeAppStatePayload(parsed);
+      if (normalized) {
+        return {
+          state: normalized,
+          migratedFrom: rawV1 ? LEGACY_STATE_KEY : LEGACY_V2_KEY
+        };
+      }
+    }
+  } catch {
+    // Fall back cleanly to default state
+  }
+  return { state: getDefaultAppState() };
+}
+
+function readLegacyAuthCredentials(): SQLiteAuthCredentials {
+  try {
+    const raw = localStorage.getItem(LEGACY_AUTH_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (
+        typeof parsed?.username === 'string' &&
+        parsed.username.trim().length > 0 &&
+        typeof parsed?.password === 'string' &&
+        parsed.password.length > 0
+      ) {
+        return {
+          username: parsed.username.trim(),
+          password: parsed.password
+        };
+      }
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return { username: 'admin', password: 'admin' };
+}
+
+function cleanupLegacyLocalStorageKeys(): void {
+  try {
+    localStorage.removeItem(LEGACY_STATE_KEY);
+    localStorage.removeItem(LEGACY_V2_KEY);
+    localStorage.removeItem(LEGACY_AUTH_KEY);
+  } catch {
+    // Ignore storage cleanup errors
+  }
+}
+
 export function isSQLiteBinaryHeader(bytes: Uint8Array): boolean {
   if (bytes.length < 16) return false;
   const header = 'SQLite format 3';
@@ -380,7 +453,37 @@ function normalizeMonthsArray(raw: unknown[]): number[] {
   return out;
 }
 
-function writeStateIntoDb(db: SqlJsDatabase, state: AppState): void {
+function writeAuthUserIntoDb(db: SqlJsDatabase, creds: SQLiteAuthCredentials): void {
+  const now = new Date().toISOString();
+  db.run('BEGIN TRANSACTION;');
+  try {
+    db.run('DELETE FROM auth_users;');
+    db.run(
+      'INSERT INTO auth_users (username, password, role, updated_at) VALUES (?, ?, ?, ?);',
+      [creds.username.trim() || 'admin', creds.password || 'admin', 'admin', now]
+    );
+    db.run('COMMIT;');
+  } catch (err) {
+    db.run('ROLLBACK;');
+    throw err;
+  }
+}
+
+function readAuthUserFromDb(db: SqlJsDatabase): SQLiteAuthCredentials | null {
+  if (!tableExists(db, 'auth_users')) return null;
+  const rows = queryRows(db, 'SELECT username, password FROM auth_users LIMIT 1;');
+  if (rows.length === 0) return null;
+  const username = String(rows[0].username || '').trim();
+  const password = String(rows[0].password || '');
+  if (!username || !password) return null;
+  return { username, password };
+}
+
+function writeStateIntoDb(
+  db: SqlJsDatabase,
+  state: AppState,
+  migratedFrom?: string
+): void {
   ensureSchema(db);
   const now = new Date().toISOString();
 
@@ -399,12 +502,18 @@ function writeStateIntoDb(db: SqlJsDatabase, state: AppState): void {
 
     db.run(
       'INSERT INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?);',
-      ['schema_version', '1', now]
+      ['schema_version', '2', now]
     );
     db.run(
       'INSERT INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?);',
       ['engine', 'sql.js-wasm', now]
     );
+    if (migratedFrom) {
+      db.run(
+        'INSERT INTO workspace_meta (key, value, updated_at) VALUES (?, ?, ?);',
+        ['migrated_from', migratedFrom, now]
+      );
+    }
 
     const years =
       state.availableYears && state.availableYears.length > 0
@@ -639,7 +748,9 @@ function readAppStateFromDb(db: SqlJsDatabase): AppState | null {
 
   const peopleRows = queryRows(db, 'SELECT * FROM people;');
   const people: Person[] = peopleRows.map((r) => {
-    const fullName = String(r.full_name || r.name || `${r.first_name || ''} ${r.last_name || ''}`).trim() || 'Team Member';
+    const fullName =
+      String(r.full_name || r.name || `${r.first_name || ''} ${r.last_name || ''}`).trim() ||
+      'Team Member';
     const parts = fullName.split(/\s+/);
     const firstName = String(r.first_name || parts[0] || 'Team');
     const lastName = String(
@@ -794,6 +905,7 @@ function buildStatsFromState(state: AppState, db?: SqlJsDatabase | null): SQLite
         rowCount: countTable('planning_years', state.availableYears.length),
         role: 'config'
       },
+      { tableName: 'auth_users', rowCount: countTable('auth_users', 1), role: 'config' },
       { tableName: 'workspace_meta', rowCount: countTable('workspace_meta', 2), role: 'config' }
     ]
   };
@@ -810,54 +922,92 @@ async function persistActiveDb(db: SqlJsDatabase): Promise<void> {
   else storageBackend = 'memory';
 }
 
-export async function initSQLiteWorkspace(
-  fallbackState: AppState
-): Promise<{ state: AppState; stats: SQLiteDatabaseStats }> {
+export async function initSQLiteWorkspace(): Promise<{
+  state: AppState;
+  authCredentials: SQLiteAuthCredentials;
+  stats: SQLiteDatabaseStats;
+}> {
+  const legacyAuth = readLegacyAuthCredentials();
+  const { state: legacyOrDefaultState, migratedFrom } = readAndNormalizeLegacyState();
+
   try {
     const SQL = await getSqlJs();
+
+    // 1. Check for embedded SQLite binary snapshot (e.g., Portable Single-File HTML)
+    let embeddedBytes: Uint8Array | null = null;
+    if (typeof window !== 'undefined' && window.__ALLOCAT_EMBEDDED_SQLITE__) {
+      try {
+        const candidate = base64ToUint8(window.__ALLOCAT_EMBEDDED_SQLITE__);
+        if (isSQLiteBinaryHeader(candidate)) {
+          embeddedBytes = candidate;
+        }
+      } catch {
+        embeddedBytes = null;
+      }
+    }
+
     const idbBytes = await readBinaryFromIdb();
     const lsBytes = readBinaryFromLocalStorage();
-    const existingBytes = idbBytes || lsBytes;
+    const existingBytes = embeddedBytes || idbBytes || lsBytes;
 
     if (existingBytes && isSQLiteBinaryHeader(existingBytes)) {
       try {
         const db = new SQL.Database(existingBytes);
         ensureSchema(db);
         const hydrated = readAppStateFromDb(db);
+        let authCreds = readAuthUserFromDb(db);
+
+        if (!authCreds) {
+          authCreds = legacyAuth;
+          writeAuthUserIntoDb(db, authCreds);
+          await persistActiveDb(db);
+        }
+
         if (hydrated && hydrated.people.length + hydrated.clients.length + hydrated.projects.length > 0) {
           activeDb = db;
           lastByteSize = existingBytes.byteLength;
           storageBackend = idbBytes ? 'indexeddb+localstorage' : 'localstorage';
-          saveAppState(hydrated);
+          if (embeddedBytes && !idbBytes) {
+            await persistActiveDb(db);
+          }
+          cleanupLegacyLocalStorageKeys();
           return {
             state: hydrated,
+            authCredentials: authCreds,
             stats: buildStatsFromState(hydrated, db)
           };
         }
         db.close();
       } catch {
-        // Corrupted or incompatible binary: rebuild cleanly from fallbackState
+        // Corrupted binary: rebuild cleanly from migrated/default state
       }
     }
 
+    // 2. Fresh database creation (migrating any legacy localStorage JSON into SQLite tables)
     const freshDb = new SQL.Database();
-    writeStateIntoDb(freshDb, fallbackState);
+    writeStateIntoDb(freshDb, legacyOrDefaultState, migratedFrom);
+    writeAuthUserIntoDb(freshDb, legacyAuth);
     activeDb = freshDb;
     await persistActiveDb(freshDb);
+    cleanupLegacyLocalStorageKeys();
+
     return {
-      state: fallbackState,
-      stats: buildStatsFromState(fallbackState, freshDb)
+      state: legacyOrDefaultState,
+      authCredentials: legacyAuth,
+      stats: buildStatsFromState(legacyOrDefaultState, freshDb)
     };
   } catch {
     return {
-      state: fallbackState,
-      stats: buildStatsFromState(fallbackState, null)
+      state: legacyOrDefaultState,
+      authCredentials: legacyAuth,
+      stats: buildStatsFromState(legacyOrDefaultState, null)
     };
   }
 }
 
 export async function syncAppStateToSQLite(state: AppState): Promise<SQLiteDatabaseStats> {
   try {
+    syncLeaveTypeConfigRegistry(state.leaveTypes);
     const SQL = await getSqlJs();
     if (!activeDb) {
       activeDb = new SQL.Database();
@@ -870,14 +1020,29 @@ export async function syncAppStateToSQLite(state: AppState): Promise<SQLiteDatab
   }
 }
 
-export async function resetSQLiteWorkspace(defaultState?: AppState): Promise<{
+export async function saveAuthCredentialsToSQLite(creds: SQLiteAuthCredentials): Promise<void> {
+  try {
+    const SQL = await getSqlJs();
+    if (!activeDb) {
+      activeDb = new SQL.Database();
+      ensureSchema(activeDb);
+    }
+    writeAuthUserIntoDb(activeDb, creds);
+    await persistActiveDb(activeDb);
+    cleanupLegacyLocalStorageKeys();
+  } catch {
+    // Ignore errors if WASM unavailable
+  }
+}
+
+export async function resetSQLiteWorkspace(): Promise<{
   state: AppState;
   stats: SQLiteDatabaseStats;
 }> {
-  const target = defaultState || getDefaultAppState();
-  saveAppState(target);
-  const stats = await syncAppStateToSQLite(target);
-  return { state: target, stats };
+  const defaults = getDefaultAppState();
+  const stats = await syncAppStateToSQLite(defaults);
+  cleanupLegacyLocalStorageKeys();
+  return { state: defaults, stats };
 }
 
 export function getSQLiteDatabaseStats(state: AppState): SQLiteDatabaseStats {
@@ -894,6 +1059,11 @@ export async function exportSQLiteBinaryFile(state: AppState): Promise<Uint8Arra
   return activeDb.export();
 }
 
+export async function exportSQLiteBase64Snapshot(state: AppState): Promise<string> {
+  const bytes = await exportSQLiteBinaryFile(state);
+  return uint8ToBase64(bytes);
+}
+
 function sqlLiteral(val: string | number | boolean | null | undefined): string {
   if (val === null || val === undefined) return 'NULL';
   if (typeof val === 'number') return Number.isFinite(val) ? String(val) : '0';
@@ -907,7 +1077,7 @@ export function exportSQLDumpScript(state: AppState): string {
 
   lines.push('-- ============================================================');
   lines.push(`-- AlloCat SQLite Relational Database Dump (${exportedAt})`);
-  lines.push('-- Engine: SQLite 3 (Normalized 9-Table Schema + Views)');
+  lines.push('-- Engine: SQLite 3 (Normalized 10-Table Schema + Views)');
   lines.push('-- ============================================================');
   lines.push('');
   lines.push('PRAGMA foreign_keys = OFF;');
@@ -915,7 +1085,7 @@ export function exportSQLDumpScript(state: AppState): string {
   lines.push('');
   lines.push(SQLITE_RELATIONAL_SCHEMA_DDL);
   lines.push('');
-  lines.push('-- Clear existing records before loading snapshot');
+  lines.push('-- Clear existing workspace tables before loading snapshot');
   lines.push('DELETE FROM leaves;');
   lines.push('DELETE FROM allocations;');
   lines.push('DELETE FROM projects;');
@@ -928,7 +1098,7 @@ export function exportSQLDumpScript(state: AppState): string {
   lines.push('');
 
   lines.push(
-    `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('schema_version')}, ${sqlLiteral('1')}, ${sqlLiteral(exportedAt)});`
+    `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('schema_version')}, ${sqlLiteral('2')}, ${sqlLiteral(exportedAt)});`
   );
   lines.push(
     `INSERT OR REPLACE INTO workspace_meta (key, value, updated_at) VALUES (${sqlLiteral('exported_at')}, ${sqlLiteral(exportedAt)}, ${sqlLiteral(exportedAt)});`
@@ -1076,7 +1246,6 @@ function mergeImportedState(
     };
   }
 
-  // Merge & Update by primary key IDs (plus name/code fallback for allocations)
   const departments = Array.from(
     new Set([...currentState.departments, ...imported.departments])
   );
@@ -1173,7 +1342,6 @@ export async function importSQLDumpScript(
   const SQL = await getSqlJs();
   const tempDb = new SQL.Database();
   try {
-    // Strip explicit transaction wrappers if partial statements exist or ensure schema exists first
     ensureSchema(tempDb);
     tempDb.run(cleaned);
     const imported = readAppStateFromDb(tempDb);

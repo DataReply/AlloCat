@@ -468,9 +468,6 @@ export const INITIAL_LEAVES: LeaveEntry[] = [
   }
 ];
 
-const STORAGE_KEY = 'allocat_app_state_v1';
-const LEGACY_STORAGE_KEY = 'staffgrid_app_state_v2';
-
 export const INITIAL_DEPARTMENTS: string[] = [
   'Engineering',
   'Design',
@@ -495,21 +492,98 @@ export interface AppState {
 declare global {
   interface Window {
     __ALLOCAT_EMBEDDED_STATE__?: AppState;
+    __ALLOCAT_EMBEDDED_SQLITE__?: string;
   }
+}
+
+export function normalizeAppStatePayload(parsed: Partial<AppState> | null | undefined): AppState | null {
+  if (
+    !parsed ||
+    !Array.isArray(parsed.people) ||
+    !Array.isArray(parsed.clients) ||
+    !Array.isArray(parsed.projects) ||
+    !Array.isArray(parsed.allocations)
+  ) {
+    return null;
+  }
+
+  const years =
+    Array.isArray(parsed.availableYears) && parsed.availableYears.length > 0
+      ? [...parsed.availableYears].sort((a, b) => a - b)
+      : [2025, 2026, 2027];
+
+  const departments =
+    Array.isArray(parsed.departments) && parsed.departments.length > 0
+      ? parsed.departments
+      : INITIAL_DEPARTMENTS;
+
+  const loadedPeople = parsed.people.map((p: Person) => {
+    const defaultPerson = INITIAL_PEOPLE.find((ip) => ip.id === p.id);
+    const rawFullName = (p.name || '').trim();
+    const nameParts = rawFullName ? rawFullName.split(/\s+/) : [];
+    const firstName =
+      p.firstName?.trim() ||
+      defaultPerson?.firstName ||
+      nameParts[0] ||
+      'Team';
+    const lastName =
+      p.lastName !== undefined && p.lastName.trim() !== ''
+        ? p.lastName.trim()
+        : defaultPerson?.lastName ||
+          (nameParts.length > 1 ? nameParts.slice(1).join(' ') : '');
+    const fullName = `${firstName} ${lastName}`.trim() || rawFullName;
+    return {
+      ...p,
+      firstName,
+      lastName,
+      name: fullName,
+      employmentType:
+        p.employmentType === 'Internal' ||
+        p.employmentType === 'External' ||
+        p.employmentType === 'B2B'
+          ? p.employmentType
+          : defaultPerson?.employmentType || 'Internal',
+      notes: p.notes !== undefined ? p.notes : (defaultPerson?.notes || '')
+    };
+  });
+
+  const loadedProjects = parsed.projects.map((proj: Project) => {
+    const defaultProj = INITIAL_PROJECTS.find((ip) => ip.id === proj.id);
+    return {
+      ...proj,
+      notes: proj.notes !== undefined ? proj.notes : (defaultProj?.notes || '')
+    };
+  });
+
+  const leaveTypes: Record<LeaveType, LeaveTypeMeta> =
+    parsed.leaveTypes &&
+    typeof parsed.leaveTypes === 'object' &&
+    Object.keys(parsed.leaveTypes).length > 0
+      ? parsed.leaveTypes
+      : { ...DEFAULT_LEAVE_TYPE_CONFIG };
+
+  syncLeaveTypeConfigRegistry(leaveTypes);
+
+  return {
+    people: loadedPeople,
+    clients: parsed.clients,
+    projects: loadedProjects,
+    allocations: parsed.allocations,
+    leaves: Array.isArray(parsed.leaves) ? parsed.leaves : INITIAL_LEAVES,
+    availableYears: years,
+    selectedYear:
+      typeof parsed.selectedYear === 'number' && years.includes(parsed.selectedYear)
+        ? parsed.selectedYear
+        : years[0] || 2026,
+    departments,
+    leaveTypes
+  };
 }
 
 export function getDefaultAppState(): AppState {
   if (typeof window !== 'undefined' && window.__ALLOCAT_EMBEDDED_STATE__) {
-    const embedded = window.__ALLOCAT_EMBEDDED_STATE__;
-    const leaveTypes =
-      embedded.leaveTypes && Object.keys(embedded.leaveTypes).length > 0
-        ? embedded.leaveTypes
-        : { ...DEFAULT_LEAVE_TYPE_CONFIG };
-    syncLeaveTypeConfigRegistry(leaveTypes);
-    return {
-      ...embedded,
-      leaveTypes
-    };
+    const normalized = normalizeAppStatePayload(window.__ALLOCAT_EMBEDDED_STATE__);
+    if (normalized) return normalized;
   }
   const defaultLeaveTypes = { ...DEFAULT_LEAVE_TYPE_CONFIG };
   syncLeaveTypeConfigRegistry(defaultLeaveTypes);
@@ -524,105 +598,4 @@ export function getDefaultAppState(): AppState {
     departments: INITIAL_DEPARTMENTS,
     leaveTypes: defaultLeaveTypes
   };
-}
-
-export function loadAppState(): AppState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
-    if (!raw) return getDefaultAppState();
-    const parsed = JSON.parse(raw);
-    if (
-      Array.isArray(parsed.people) &&
-      Array.isArray(parsed.clients) &&
-      Array.isArray(parsed.projects) &&
-      Array.isArray(parsed.allocations)
-    ) {
-      const years = Array.isArray(parsed.availableYears) && parsed.availableYears.length > 0
-        ? parsed.availableYears.sort((a: number, b: number) => a - b)
-        : [2025, 2026, 2027];
-
-      const departments = Array.isArray(parsed.departments) && parsed.departments.length > 0
-        ? parsed.departments
-        : INITIAL_DEPARTMENTS;
-
-      const loadedPeople = parsed.people.map((p: Person) => {
-        const defaultPerson = INITIAL_PEOPLE.find((ip) => ip.id === p.id);
-        const rawFullName = (p.name || '').trim();
-        const nameParts = rawFullName ? rawFullName.split(/\s+/) : [];
-        const firstName =
-          p.firstName?.trim() ||
-          defaultPerson?.firstName ||
-          nameParts[0] ||
-          'Team';
-        const lastName =
-          p.lastName !== undefined && p.lastName.trim() !== ''
-            ? p.lastName.trim()
-            : defaultPerson?.lastName ||
-              (nameParts.length > 1 ? nameParts.slice(1).join(' ') : '');
-        const fullName = `${firstName} ${lastName}`.trim() || rawFullName;
-        return {
-          ...p,
-          firstName,
-          lastName,
-          name: fullName,
-          employmentType:
-            p.employmentType === 'Internal' ||
-            p.employmentType === 'External' ||
-            p.employmentType === 'B2B'
-              ? p.employmentType
-              : defaultPerson?.employmentType || 'Internal',
-          notes: p.notes !== undefined ? p.notes : (defaultPerson?.notes || '')
-        };
-      });
-
-      const loadedProjects = parsed.projects.map((proj: Project) => {
-        const defaultProj = INITIAL_PROJECTS.find((ip) => ip.id === proj.id);
-        return {
-          ...proj,
-          notes: proj.notes !== undefined ? proj.notes : (defaultProj?.notes || '')
-        };
-      });
-
-      const leaveTypes: Record<LeaveType, LeaveTypeMeta> =
-        parsed.leaveTypes &&
-        typeof parsed.leaveTypes === 'object' &&
-        Object.keys(parsed.leaveTypes).length > 0
-          ? parsed.leaveTypes
-          : { ...DEFAULT_LEAVE_TYPE_CONFIG };
-
-      syncLeaveTypeConfigRegistry(leaveTypes);
-
-      return {
-        people: loadedPeople,
-        clients: parsed.clients,
-        projects: loadedProjects,
-        allocations: parsed.allocations,
-        leaves: Array.isArray(parsed.leaves) ? parsed.leaves : INITIAL_LEAVES,
-        availableYears: years,
-        selectedYear: typeof parsed.selectedYear === 'number' && years.includes(parsed.selectedYear)
-          ? parsed.selectedYear
-          : years[0] || 2026,
-        departments,
-        leaveTypes
-      };
-    }
-  } catch (e) {
-    console.error('Failed to load saved state, using default dataset', e);
-  }
-  return getDefaultAppState();
-}
-
-export function saveAppState(state: AppState): void {
-  try {
-    syncLeaveTypeConfigRegistry(state.leaveTypes);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.error('Failed to persist state to localStorage', e);
-  }
-}
-
-export function resetAppState(): AppState {
-  const defaults = getDefaultAppState();
-  saveAppState(defaults);
-  return defaults;
 }

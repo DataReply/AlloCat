@@ -522,7 +522,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       )
                     }
                     className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors cursor-pointer"
-                    title="Import or export CSV / JSON for this directory"
+                    title="Import or export SQLite, CSV, or JSON for this directory"
                   >
                     <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                     <span>Import / Export</span>
@@ -722,7 +722,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       type="button"
                       onClick={() => onOpenExportImport('admin')}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 rounded-lg transition-colors cursor-pointer shrink-0"
-                      title="Import or export Admin & Directories (CSV / JSON)"
+                      title="Import or export Admin & Directories (SQLite / CSV / JSON)"
                     >
                       <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
                       <span>Import / Export</span>
@@ -1545,7 +1545,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </h3>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Export full JSON backups or CSV spreadsheets, restore from a file, or reset to demo defaults.
+                        Export SQLite databases, SQL dumps, JSON backups, or CSV spreadsheets, restore from a file, or reset to demo defaults.
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
                         <button

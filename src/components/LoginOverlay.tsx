@@ -18,38 +18,10 @@ export interface AuthCredentials {
   password: string;
 }
 
-const AUTH_CREDENTIALS_KEY = 'allocat_auth_credentials_v1';
-
-export function loadAuthCredentials(): AuthCredentials {
-  try {
-    const raw = localStorage.getItem(AUTH_CREDENTIALS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (
-        typeof parsed?.username === 'string' &&
-        parsed.username.trim().length > 0 &&
-        typeof parsed?.password === 'string' &&
-        parsed.password.length > 0
-      ) {
-        return {
-          username: parsed.username.trim(),
-          password: parsed.password
-        };
-      }
-    }
-  } catch {
-    // ignore storage errors
-  }
-  return { username: 'admin', password: 'admin' };
-}
-
-export function saveAuthCredentials(creds: AuthCredentials): void {
-  try {
-    localStorage.setItem(AUTH_CREDENTIALS_KEY, JSON.stringify(creds));
-  } catch {
-    // ignore storage errors
-  }
-}
+export const DEFAULT_AUTH_CREDENTIALS: AuthCredentials = {
+  username: 'admin',
+  password: 'admin'
+};
 
 interface LoginOverlayProps {
   credentials: AuthCredentials;

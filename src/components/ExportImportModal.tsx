@@ -46,6 +46,7 @@ import {
   getSQLiteDatabaseStats,
   syncAppStateToSQLite,
   exportSQLiteBinaryFile,
+  exportSQLiteBase64Snapshot,
   exportSQLDumpScript,
   importSQLiteBinaryFile,
   importSQLDumpScript,
@@ -221,7 +222,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
         type: 'success',
         message: `Exported binary SQLite 3 database (allocat-workspace-${dateStr}.sqlite, ${(
           bytes.byteLength / 1024
-        ).toFixed(1)} KB) with all 9 relational tables and analytical views.`
+        ).toFixed(1)} KB) with all 10 relational tables and analytical views.`
       });
     } catch (err) {
       setStatus({
@@ -310,7 +311,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
         throw new Error('Compiled bundle not found');
       }
 
-      const embeddedJson = JSON.stringify(appState).replace(/<\//g, '<\\/');
+      const sqliteBase64 = await exportSQLiteBase64Snapshot(appState);
 
       const standaloneHtml = `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -325,7 +326,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
   <div id="root"></div>
-  <script>window.__ALLOCAT_EMBEDDED_STATE__ = ${embeddedJson};</script>
+  <script>window.__ALLOCAT_EMBEDDED_SQLITE__ = ${JSON.stringify(sqliteBase64)};</script>
   <script type="module">${jsText}</script>
 </body>
 </html>`;
@@ -659,7 +660,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  All edits automatically synchronize into 9 normalized relational tables persisted locally in IndexedDB and compatible with standard SQLite 3 desktop tools.
+                  All edits automatically synchronize into 10 normalized relational tables persisted locally in IndexedDB and compatible with standard SQLite 3 desktop tools.
                 </p>
               </div>
 
@@ -679,7 +680,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             </div>
 
             {/* Live Table Row Counts */}
-            <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
               {sqliteStats.tables.map((t) => (
                 <div
                   key={t.tableName}

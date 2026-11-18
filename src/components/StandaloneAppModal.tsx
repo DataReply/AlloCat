@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { AppState } from '../data/seedData';
 import { triggerFileDownload } from '../utils/importExportUtils';
+import { exportSQLiteBase64Snapshot } from '../utils/sqliteDatabase';
 import { usePWAInstall } from '../utils/usePWAInstall';
 
 interface StandaloneAppModalProps {
@@ -82,7 +83,7 @@ export const StandaloneAppModal: React.FC<StandaloneAppModalProps> = ({
       throw new Error('Compiled application bundle not found.');
     }
 
-    const embeddedJson = JSON.stringify(appState).replace(/<\//g, '<\\/');
+    const sqliteBase64 = await exportSQLiteBase64Snapshot(appState);
 
     return `<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -98,7 +99,7 @@ export const StandaloneAppModal: React.FC<StandaloneAppModalProps> = ({
 </head>
 <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
   <div id="root"></div>
-  <script>window.__ALLOCAT_EMBEDDED_STATE__ = ${embeddedJson};</script>
+  <script>window.__ALLOCAT_EMBEDDED_SQLITE__ = ${JSON.stringify(sqliteBase64)};</script>
   <script type="module">${jsText}</script>
 </body>
 </html>`;

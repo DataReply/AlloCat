@@ -14,9 +14,7 @@ import {
 } from './types';
 import {
   AppState,
-  loadAppState,
-  saveAppState,
-  resetAppState
+  getDefaultAppState
 } from './data/seedData';
 import {
   calculateExecutiveKPIs,
@@ -46,25 +44,26 @@ import {
   LoginOverlay,
   ChangeCredentialsModal,
   AuthCredentials,
-  loadAuthCredentials,
-  saveAuthCredentials
+  DEFAULT_AUTH_CREDENTIALS
 } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
 import {
   initSQLiteWorkspace,
   syncAppStateToSQLite,
+  saveAuthCredentialsToSQLite,
   resetSQLiteWorkspace
 } from './utils/sqliteDatabase';
 
 export function App() {
   const isOnline = useOnlineStatus();
-  const [appState, setAppState] = useState<AppState>(() => loadAppState());
+  const [appState, setAppState] = useState<AppState>(() => getDefaultAppState());
+  const [isSqliteBooted, setIsSqliteBooted] = useState(false);
   const isSqliteReadyRef = useRef(false);
   const skipNextSqliteSyncRef = useRef(false);
   const [viewMode, setViewMode] = useState<ViewMode>('clients');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [authCredentials, setAuthCredentials] = useState<AuthCredentials>(() =>
-    loadAuthCredentials()
+  const [authCredentials, setAuthCredentials] = useState<AuthCredentials>(
+    DEFAULT_AUTH_CREDENTIALS
   );
   const [currentUser, setCurrentUser] = useState<string | null>(() => {
     try {
@@ -144,23 +143,25 @@ export function App() {
   }>({ isOpen: false, tab: 'departments' });
   const [isStandaloneModalOpen, setIsStandaloneModalOpen] = useState(false);
 
-  // Boot SQLite WebAssembly engine and hydrate state if stored in IndexedDB/SQLite
+  // Boot SQLite WebAssembly engine and hydrate workspace + auth tables (with one-time legacy migration)
   useEffect(() => {
     let cancelled = false;
-    initSQLiteWorkspace(loadAppState()).then(({ state }) => {
+    initSQLiteWorkspace().then(({ state, authCredentials: loadedCreds }) => {
       if (cancelled) return;
       isSqliteReadyRef.current = true;
       skipNextSqliteSyncRef.current = true;
       setAppState(state);
+      setAuthCredentials(loadedCreds);
+      setExpandedProjectIds(new Set(state.projects.map((p) => p.id)));
+      setIsSqliteBooted(true);
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Save state changes to localStorage and sync to relational SQLite engine
+  // Synchronize workspace state changes directly into normalized SQLite tables
   useEffect(() => {
-    saveAppState(appState);
     if (!isSqliteReadyRef.current) return;
     if (skipNextSqliteSyncRef.current) {
       skipNextSqliteSyncRef.current = false;
@@ -874,6 +875,14 @@ export function App() {
     };
   }, [activeCellEditor, people, projects, allocations, selectedYear]);
 
+  if (!isSqliteBooted) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-200 text-xs font-mono">
+        Initializing SQLite relational workspace...
+      </div>
+    );
+  }
+
   return (
     <div className="h-screen overflow-hidden flex flex-col bg-slate-200/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative">
       {!currentUser && (
@@ -1190,9 +1199,9 @@ export function App() {
           setIsExportModalOpen(true);
         }}
         onResetWorkspace={() => {
-          const fresh = resetAppState();
+          const fresh = getDefaultAppState();
           setAppState(fresh);
-          resetSQLiteWorkspace(fresh);
+          resetSQLiteWorkspace();
         }}
       />
 
@@ -1297,9 +1306,9 @@ export function App() {
         initialScope={exportModalScope}
         onImportState={(newState) => setAppState(newState)}
         onResetToDefault={() => {
-          const fresh = resetAppState();
+          const fresh = getDefaultAppState();
           setAppState(fresh);
-          resetSQLiteWorkspace(fresh);
+          resetSQLiteWorkspace();
         }}
         onOpenStandaloneModal={() => {
           setIsExportModalOpen(false);
@@ -1312,7 +1321,7 @@ export function App() {
         onClose={() => setIsChangeCredentialsOpen(false)}
         currentCredentials={authCredentials}
         onSaveCredentials={(newCreds) => {
-          saveAuthCredentials(newCreds);
+          saveAuthCredentialsToSQLite(newCreds);
           setAuthCredentials(newCreds);
           setCurrentUser(newCreds.username);
           try {
