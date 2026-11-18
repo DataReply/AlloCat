@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AlloCat - Resource & Capacity Planner</title>
+    <meta name="description" content="Interactive annual resource allocation matrix for planning team staffing across clients and projects with real-time capacity and overtime tracking." />
+    <meta property="og:title" content="AlloCat - Resource & Capacity Planner" />
+    <meta property="og:description" content="Interactive annual resource allocation matrix for planning team staffing across clients and projects with real-time capacity and overtime tracking." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ictismylife-dev.github.io/AlloCat/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "https://esm.sh/react@19.0.0",
+          "react/jsx-runtime": "https://esm.sh/react@19.0.0/jsx-runtime",
+          "react-dom": "https://esm.sh/react-dom@19.0.0",
+          "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+          "lucide-react": "https://esm.sh/lucide-react@0.475.0?deps=react@19.0.0"
+        }
+      }
+    </script>
+  </head>
+  <body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased font-sans">
+    <div id="root"></div>
+    <script type="module">
+      (async function bootAlloCat() {
+        try {
+          if ('serviceWorker' in navigator && window.location.hostname.includes('github.io')) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            for (const reg of regs) {
+              await reg.unregister();
+            }
+          }
+        } catch (_) {}
+
+        const cacheBust = Date.now();
+
+        // 1. Try pre-compiled production bundle in ./assets/app.js if it matches the latest build
+        try {
+          const check = await fetch('./assets/app.js?v=' + cacheBust, { cache: 'no-store' });
+          const contentType = check.headers.get('content-type') || '';
+          if (check.ok && !contentType.includes('text/html')) {
+            const jsCode = await check.text();
+            if (jsCode.includes('Reporting & Capacity Analytics')) {
+              const link = document.createElement('link');
+              link.rel = 'stylesheet';
+              link.href = './assets/app.css?v=' + cacheBust;
+              document.head.appendChild(link);
+
+              const blob = new Blob([jsCode], { type: 'text/javascript' });
+              const script = document.createElement('script');
+              script.type = 'module';
+              script.src = URL.createObjectURL(blob);
+              document.body.appendChild(script);
+              return;
+            }
+          }
+        } catch (_) {
+          // Proceed to live source runtime
+        }
+
+        // 2. Live source runtime (compiles latest TypeScript/React directly from repository src/)
+        const twStyle = document.createElement('style');
+        twStyle.setAttribute('type', 'text/tailwindcss');
+        twStyle.textContent = '@import "tailwindcss";\n@custom-variant dark (&:where(.dark, .dark *));';
+        document.head.appendChild(twStyle);
+
+        const loadScript = (src) =>
+          new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = src;
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+          });
+
+        const [ReactMod, ReactJSXMod, ReactDOMClientMod, LucideMod] = await Promise.all([
+          import('react'),
+          import('react/jsx-runtime'),
+          import('react-dom/client'),
+          import('lucide-react'),
+          loadScript('https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4'),
+          loadScript('https://unpkg.com/@babel/standalone@7.26.9/babel.min.js')
+        ]);
+
+        const wrapEsModule = (mod) => {
+          const base = Object.assign({}, mod && mod.default ? mod.default : {}, mod);
+          Object.defineProperty(base, '__esModule', { value: true });
+          if (!base.default) base.default = base;
+          return base;
+        };
+
+        const externalModules = {
+          'react': wrapEsModule(ReactMod),
+          'react/jsx-runtime': wrapEsModule(ReactJSXMod),
+          'react-dom': wrapEsModule(ReactDOMClientMod),
+          'react-dom/client': wrapEsModule(ReactDOMClientMod),
+          'lucide-react': wrapEsModule(LucideMod),
+          'virtual:pwa-register': {
+            __esModule: true,
+            registerSW: () => () => {}
+          }
+        };
+
+        const moduleOrder = [
+          'types/index.ts',
+          'utils/allocationMath.ts',
+          'data/seedData.ts',
+          'utils/importExportUtils.ts',
+          'utils/usePWAInstall.ts',
+          'components/LoginOverlay.tsx',
+          'components/CommentCell.tsx',
+          'components/CellAllocationPopover.tsx',
+          'components/AdminPanelModal.tsx',
+          'components/ReportingModal.tsx',
+          'components/StandaloneAppModal.tsx',
+          'components/Header.tsx',
+          'components/Toolbar.tsx',
+          'components/PeopleMatrixView.tsx',
+          'components/ClientProjectMatrixView.tsx',
+          'components/AvailabilityMatrixView.tsx',
+          'components/BenchMatrixView.tsx',
+          'components/AddLeaveModal.tsx',
+          'components/AddPersonModal.tsx',
+          'components/AddClientProjectModal.tsx',
+          'components/BatchAssignModal.tsx',
+          'components/ConfirmDeletePersonModal.tsx',
+          'components/ManageDepartmentsModal.tsx',
+          'components/ManageYearsModal.tsx',
+          'components/OvertimeAlertsDrawer.tsx',
+          'components/ExportImportModal.tsx',
+          'App.tsx',
+          'main.tsx'
+        ];
+
+        const baseCandidates = [
+          '../src/',
+          './src/',
+          'https://raw.githubusercontent.com/ictismylife-dev/AlloCat/main/src/',
+          'https://raw.githubusercontent.com/ictismylife-dev/AlloCat/master/src/'
+        ];
+
+        async function fetchSource(relPath) {
+          for (const base of baseCandidates) {
+            try {
+              const res = await fetch(base + relPath + '?v=' + cacheBust, { cache: 'no-store' });
+              if (res.ok) {
+                const txt = await res.text();
+                if (!txt.trim().startsWith('<!doctype') && !txt.trim().startsWith('<!DOCTYPE')) {
+                  return txt;
+                }
+              }
+            } catch (_) {}
+          }
+          throw new Error('Could not load ' + relPath);
+        }
+
+        const rawSources = {};
+        await Promise.all(
+          moduleOrder.map(async (modPath) => {
+            rawSources[modPath] = await fetchSource(modPath);
+          })
+        );
+
+        const compiledRegistry = {};
+        const evaluatedExports = {};
+
+        function resolveKey(fromModule, importSpec) {
+          const fromParts = fromModule.split('/');
+          fromParts.pop();
+          const specParts = importSpec.split('/');
+          for (const part of specParts) {
+            if (part === '.' || part === '') continue;
+            if (part === '..') fromParts.pop();
+            else fromParts.push(part);
+          }
+          const joined = fromParts.join('/');
+          const candidates = [
+            joined,
+            joined + '.ts',
+            joined + '.tsx',
+            joined + '/index.ts',
+            joined + '/index.tsx'
+          ];
+          return candidates.find((c) => Boolean(compiledRegistry[c])) || null;
+        }
+
+        for (const modPath of moduleOrder) {
+          const code = rawSources[modPath];
+          compiledRegistry[modPath] = window.Babel.transform(code, {
+            filename: modPath,
+            presets: [
+              ['typescript', { isTSX: true, allExtensions: true }],
+              ['react', { runtime: 'automatic' }]
+            ],
+            plugins: ['transform-modules-commonjs']
+          }).code;
+        }
+
+        function evaluateModule(modPath) {
+          if (evaluatedExports[modPath]) return evaluatedExports[modPath];
+          const exportsObj = {};
+          const moduleObj = { exports: exportsObj };
+          evaluatedExports[modPath] = exportsObj;
+
+          const customRequire = (spec) => {
+            if (spec.endsWith('.css')) return {};
+            if (externalModules[spec]) return externalModules[spec];
+            if (spec.startsWith('.')) {
+              const targetKey = resolveKey(modPath, spec);
+              if (!targetKey) throw new Error('Cannot resolve ' + spec + ' from ' + modPath);
+              return evaluateModule(targetKey);
+            }
+            throw new Error('Unknown external import: ' + spec);
+          };
+
+          const fn = new Function('exports', 'require', 'module', compiledRegistry[modPath]);
+          fn(exportsObj, customRequire, moduleObj);
+          evaluatedExports[modPath] = moduleObj.exports;
+          return moduleObj.exports;
+        }
+
+        evaluateModule('main.tsx');
+      })();
+    </script>
+  </body>
+</html>
