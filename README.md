@@ -13,9 +13,9 @@ All workspace data and administrator credentials run locally in the browser on a
 - **Primary Persistence**: Binary `.sqlite` database stored in browser **IndexedDB** (`allocat_sqlite_idb`), mirrored to a base64 backup in `localStorage` (`allocat_sqlite_b64_v1`), with automatic one-time migration from legacy `localStorage` payloads.
 - **Normalized Relational Schema (10 Tables + 2 Analytical Views)**:
   - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
-  - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
+  - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `jan_status`–`dec_status`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
   - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `auth_users`, `workspace_meta`
-  - **Analytical SQL Views**: `v_allocation_months`, `v_person_annual_summary`
+  - **Analytical SQL Views**: `v_allocation_months` (monthly percentages + statuses), `v_person_annual_summary`
 
 ---
 
@@ -26,12 +26,12 @@ AlloCat lets you inspect and edit your organization's staffing plan from four sy
 1. **By Clients & Projects (`ClientProjectMatrixView` — Default View)**
    - Opens with deliverable projects expanded under their respective client organizations, sorted alphabetically **`A → Z`**.
    - Tracks monthly total project staffing (`%` and `FTE` equivalents) and headcount assigned to each initiative.
-   - Manage the specific team members assigned to each project and adjust their monthly allocation percentages directly.
+   - Displays color-coded **per-month allocation statuses** (**Unknown** gray, **Planned** yellow, **Confirmed** green) with one-click inline status cycling and a color legend above the matrix.
 
 2. **By People (`PeopleMatrixView`)**
    - Displays every team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`).
-   - Expand any person's row (or click **Expand All Rows**) to view and edit individual project allocations month by month.
-   - Click any monthly summary cell or project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown, a multi-segment capacity bar, active leave reductions, and quick project switching.
+   - Expand any person's row (or click **Expand All Rows**) to view and edit individual project allocations and per-month statuses (**Unknown**, **Planned**, **Confirmed**) month by month.
+   - Click any monthly project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown, a multi-segment capacity bar, active leave reductions, month status selector, and quick project switching.
 
 3. **Availability & Leaves (`AvailabilityMatrixView`)**
    - Tracks scheduled vacations, PTO, sick leave, parental leave, sabbaticals, and custom leave types across the 12-month timeline.
@@ -57,13 +57,13 @@ Click **Reports** in the top header (or open **AlloCat Logo Menu → Reporting &
 
 ## SQLite-Aligned Import, Export, Templates & SQL Inspector
 
-Open **Import / Export** from the top toolbar or Admin Panel to back up, inspect, query, or bulk-edit workspace data:
+Open **Import / Export** from the **Admin Panel** (accessible via the **AlloCat Logo Menu → Open Admin Panel**) to back up, inspect, query, or bulk-edit workspace data:
 
 - **SQLite Binary & SQL Dump (`.sqlite` / `.sql`)**:
   - Export or import the live relational **SQLite 3** database file (`.sqlite` / `.db`) or a complete `DDL + INSERT` script (`.sql`) compatible with DB Browser for SQLite and standard SQLite CLI tooling.
   - Built-in **SQLite Schema & Query Inspector** to browse the full `CREATE TABLE` / `CREATE VIEW` DDL and run read-only `SELECT`, `WITH`, `PRAGMA`, or `EXPLAIN` queries directly against live tables and views.
 - **Per-Table & View-Scoped CSV / JSON Export & Import**:
-  - **SQLite Tables**: Export, import, or download empty/example `.csv` and `.json` templates mapped 1:1 to normalized columns with preserved primary/foreign keys for `people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, and `planning_years`.
+  - **SQLite Tables**: Export, import, or download empty/example `.csv` and `.json` templates mapped 1:1 to normalized columns—including `jan_status`–`dec_status` (`unknown`, `planned`, `confirmed`) on `allocations`—with preserved primary/foreign keys for `people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, and `planning_years`.
   - **Views & Full Workspace**: Export or import synchronized relational snapshots for `All Tables`, `Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, or `Admin Directories`, supporting both **Merge / Upsert** and **Full Replace** import modes.
 - **Standalone Offline HTML App**: Bundle the compiled app and a live base64-encoded SQLite database snapshot (`window.__ALLOCAT_EMBEDDED_SQLITE__`) into a single self-contained `.html` file.
 
@@ -99,7 +99,11 @@ Before signing in, the workspace is locked behind a sign-in overlay.
   - **Visible Months Selector**: Focus the matrix on specific quarters, half-years, or custom month subsets (`Jan` – `Dec`).
 - **Default `A → Z` Sorting**: Sorts people (`Last Name: A → Z`) and clients/projects (`A → Z`) by default, with quick toggles for `Z–A`, `First Name`, or `Original Order`.
 - **Person-Grouped Overtime Alerts Drawer**: Groups all over-allocated months per team member with one-click per-month **Auto-Cap** and **Auto-Cap All Months** actions.
-- **Interactive Cell Popover & Batch Assignment**: Adjust allocations via slider or presets (`0%`, `25%`, `50%`, `75%`, `100%`) across a single month, the remainder of the year, or all 12 months.
+- **Per-Month Allocation Statuses & Theme Contrast**:
+  - Track commitment per person, project, and month using three statuses: **Unknown** (gray), **Planned** (yellow), and **Confirmed** (green).
+  - Toggle statuses inline directly inside matrix cells, in the **Cell Allocation Popover**, or across a month range via **Assign Staff** (`BatchAssignModal`).
+  - Uses opaque, high-contrast status field colors in both **Dark Mode** and **Light Mode** so cells remain clear and legible over dark surfaces.
+- **Interactive Cell Popover & Batch Assignment**: Adjust allocations via slider or presets (`0%`, `25%`, `50%`, `75%`, `100%`) and set the month status across a single month, the remainder of the year, or all 12 months.
 - **Inline Comments & Staffing Notes**: Edit notes inline for people, projects, assignments, and leaves.
 
 ---
