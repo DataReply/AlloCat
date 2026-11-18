@@ -1,26 +1,123 @@
 # AlloCat — Resource & Capacity Planner
 
-**AlloCat** is an interactive annual resource allocation and capacity planning application designed for engineering, product, design, and delivery teams. It provides a unified 12-month matrix workspace to plan team staffing across clients and deliverable projects, track time off and leaves, identify available bench capacity, and prevent overtime conflicts in real time.
+**AlloCat** is an interactive annual resource allocation and capacity planning application designed for engineering, product, design, and delivery teams. It provides a unified 12-month matrix workspace backed by an in-browser relational **SQLite WebAssembly (`sql.js`)** database to plan team staffing across clients and deliverable projects, track time off and leaves, identify available bench capacity, analyze utilization & billable ratios, and prevent overtime conflicts in real time.
 
 **Live Application:** [https://ictismylife-dev.github.io/AlloCat/](https://ictismylife-dev.github.io/AlloCat/)
 
 ---
 
-## Standalone Windows & Offline Desktop Installation
+## Relational SQLite Storage Architecture
 
-AlloCat can be installed and run as a **standalone desktop application on Windows 10 / 11** (as well as macOS and Linux) with full offline functionality. Click the **Windows App** button in the top header (or open the **AlloCat Logo Menu → Windows & Offline App**) to choose from three installation options:
+All workspace data and administrator credentials run locally in the browser on an in-memory **SQLite 3** engine compiled to WebAssembly (`sql.js`) with foreign-key enforcement (`PRAGMA foreign_keys = ON`) and automatic binary persistence:
 
-1. **Option 1: Native Windows Desktop App (PWA — Recommended)**
-   - Click **Install on Windows Now** inside the app modal (or in **Microsoft Edge**: click the *App Available* icon in the address bar / `⋯ → Apps → Install AlloCat as an app`; in **Google Chrome**: `⋮ → Cast, save, and share → Install AlloCat...`).
-   - Installs AlloCat natively into your **Windows Start Menu**, **Taskbar**, and **Desktop**.
-   - Launches in its own dedicated standalone desktop window (without browser tabs or URL bars) and runs **100% offline** via built-in Service Worker caching.
+- **Primary Persistence**: Binary `.sqlite` database stored in browser **IndexedDB** (`allocat_sqlite_idb`), mirrored to a base64 backup in `localStorage` (`allocat_sqlite_b64_v1`), with automatic one-time migration from legacy `localStorage` payloads.
+- **Normalized Relational Schema (10 Tables + 2 Analytical Views)**:
+  - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
+  - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
+  - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `auth_users`, `workspace_meta`
+  - **Analytical SQL Views**: `v_allocation_months`, `v_person_annual_summary`
 
-2. **Option 2: Portable Offline Windows Bundle (`AlloCat-Standalone.html` + `.bat`)**
-   - **Portable Offline File (`AlloCat-Standalone.html`)**: Bundles the entire compiled application (`JS` + `CSS`) and your current workspace database into a single self-contained `.html` file that runs offline from any local folder or USB drive.
-   - **Windows App-Mode Launcher (`AlloCat-Windows-Launcher.bat`)**: Double-click on Windows to launch `AlloCat-Standalone.html` (or the live app) inside a native frameless Windows desktop window (`--app` mode).
+---
 
-3. **Option 3: Build a Standalone Windows `.exe` Installer (Electron)**
-   - The repository includes an Electron desktop wrapper (`electron/main.cjs`). To package a standalone `.exe` installer on Windows:
+## Core Views & Perspectives
+
+AlloCat lets you inspect and edit your organization's staffing plan from four synchronized perspectives, with a pinned header and KPI/filter toolbar so only the matrix table scrolls:
+
+1. **By Clients & Projects (`ClientProjectMatrixView` — Default View)**
+   - Opens with deliverable projects expanded under their respective client organizations, sorted alphabetically **`A → Z`**.
+   - Tracks monthly total project staffing (`%` and `FTE` equivalents) and headcount assigned to each initiative.
+   - Manage the specific team members assigned to each project and adjust their monthly allocation percentages directly.
+
+2. **By People (`PeopleMatrixView`)**
+   - Displays every team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`).
+   - Expand any person's row (or click **Expand All Rows**) to view and edit individual project allocations month by month.
+   - Click any monthly summary cell or project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown, a multi-segment capacity bar, active leave reductions, and quick project switching.
+
+3. **Availability & Leaves (`AvailabilityMatrixView`)**
+   - Tracks scheduled vacations, PTO, sick leave, parental leave, sabbaticals, and custom leave types across the 12-month timeline.
+   - Automatically calculates each person's **effective monthly capacity** (`Base Capacity − Leave Impact`) and flags months where project bookings exceed reduced availability.
+
+4. **Bench (`BenchMatrixView`)**
+   - Highlights unallocated working capacity (`Effective Capacity − Booked Projects`) for every team member each month.
+   - Includes a quick capacity filter (`≥ 10%`, `≥ 20%`, `≥ 50%`, `100% free`) so resource managers can immediately identify available staff and assign them to projects in one click.
+
+---
+
+## Reporting & Capacity Analytics
+
+Click **Reports** in the top header (or open **AlloCat Logo Menu → Reporting & Analytics**) to launch the multi-perspective analytics suite, filterable by **Year**, **Department**, and **Contract Type** (`Internal`, `External`, `B2B`):
+
+- **Dept Utilization & Trends**: Monthly and annual department capacity vs. bookings, headroom, and utilization trends.
+- **Billable vs. Internal**: FTE and percentage split between billable client work and internal initiatives across the organization and by department.
+- **Client & Project Effort**: Portfolio FTE distribution across clients and deliverable projects.
+- **Overtime, Bench & Leaves**: Over-allocation risk audit, unbooked bench capacity, and scheduled leave impact.
+- **Report Exports**: Download the active report tab as `.csv` or export the complete multi-tab analytical pack as `.json`.
+
+---
+
+## SQLite-Aligned Import, Export, Templates & SQL Inspector
+
+Open **Import / Export** from the top toolbar or Admin Panel to back up, inspect, query, or bulk-edit workspace data:
+
+- **SQLite Binary & SQL Dump (`.sqlite` / `.sql`)**:
+  - Export or import the live relational **SQLite 3** database file (`.sqlite` / `.db`) or a complete `DDL + INSERT` script (`.sql`) compatible with DB Browser for SQLite and standard SQLite CLI tooling.
+  - Built-in **SQLite Schema & Query Inspector** to browse the full `CREATE TABLE` / `CREATE VIEW` DDL and run read-only `SELECT`, `WITH`, `PRAGMA`, or `EXPLAIN` queries directly against live tables and views.
+- **Per-Table & View-Scoped CSV / JSON Export & Import**:
+  - **SQLite Tables**: Export, import, or download empty/example `.csv` and `.json` templates mapped 1:1 to normalized columns with preserved primary/foreign keys for `people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, and `planning_years`.
+  - **Views & Full Workspace**: Export or import synchronized relational snapshots for `All Tables`, `Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, or `Admin Directories`, supporting both **Merge / Upsert** and **Full Replace** import modes.
+- **Standalone Offline HTML App**: Bundle the compiled app and a live base64-encoded SQLite database snapshot (`window.__ALLOCAT_EMBEDDED_SQLITE__`) into a single self-contained `.html` file.
+
+---
+
+## Authentication, Logo Menu & Admin Control Panel
+
+Before signing in, the workspace is locked behind a sign-in overlay.
+
+- **Default Login:** `admin`
+- **Default Password:** `admin`
+- **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
+  - **Open Admin Panel (`Manage All`)**: Centralized management modal with six tabs and Quick Jump shortcuts:
+    1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, and remove staff.
+    2. **Departments**: Create departments, inline-rename existing departments (cascading updates to team members), and remove unused departments.
+    3. **Clients**: Search client organizations, create clients with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients with cascading project cleanup.
+    4. **Projects**: Search deliverable projects, inspect codes, parent clients, billing status (`Billable` vs. `Internal`), and assigned headcount, or add, edit, and delete projects.
+    5. **Time Off & Leaves**: Browse all scheduled leaves, customize leave types and default impacts, schedule new time off, or remove leave entries.
+    6. **Years & System**: Add/switch/remove planning years, change administrator login credentials, open Import/Export tools, or reset the workspace to default seed data.
+  - **Reporting & Analytics**: Jump straight to the Reporting & Capacity Analytics modal.
+  - **Switch to Light / Dark Mode**: Toggle between Dark Mode (default) and balanced Light Mode.
+  - **Windows & Offline App**: Open the desktop PWA installer and portable bundle generator.
+  - **Change Login & Password**: Verify your current password and update credentials stored in SQLite `auth_users`.
+  - **Log Out / Lock Workspace**: Lock and blur the workspace until signed in again.
+
+---
+
+## Key Workspace Features
+
+- **Header & Toolbar Controls**:
+  - **Planning Year Dropdown**: Switch between active planning years (`2025`, `2026`, `2027`, etc.) or open **+ Manage Years...**.
+  - **Consolidated `+ Add` Menu & `Assign Staff`**: Create **+ Time Off**, **+ Person**, or **+ Project**, or batch-assign staff across months.
+  - **Visible Months Selector**: Focus the matrix on specific quarters, half-years, or custom month subsets (`Jan` – `Dec`).
+- **Default `A → Z` Sorting**: Sorts people (`Last Name: A → Z`) and clients/projects (`A → Z`) by default, with quick toggles for `Z–A`, `First Name`, or `Original Order`.
+- **Person-Grouped Overtime Alerts Drawer**: Groups all over-allocated months per team member with one-click per-month **Auto-Cap** and **Auto-Cap All Months** actions.
+- **Interactive Cell Popover & Batch Assignment**: Adjust allocations via slider or presets (`0%`, `25%`, `50%`, `75%`, `100%`) across a single month, the remainder of the year, or all 12 months.
+- **Inline Comments & Staffing Notes**: Edit notes inline for people, projects, assignments, and leaves.
+
+---
+
+## Standalone Desktop & Offline Installation
+
+AlloCat can be installed and run as a **standalone desktop application on Windows 10 / 11** (as well as macOS and Linux) with full offline functionality. Open **AlloCat Logo Menu → Windows & Offline App** to choose from three options:
+
+1. **Native Desktop App (PWA — Recommended)**
+   - Click **Install on Windows Now** inside the modal (or use **Microsoft Edge** `⋯ → Apps → Install AlloCat as an app` / **Google Chrome** `⋮ → Cast, save, and share → Install AlloCat...`).
+   - Runs in a dedicated standalone desktop window with full offline support via Workbox Service Worker caching.
+
+2. **Portable Offline Bundle (`AlloCat-Standalone.html` + `.bat`)**
+   - **`AlloCat-Standalone.html`**: Bundles the compiled application (`JS` + `CSS`) and live SQLite workspace snapshot into a single self-contained `.html` file.
+   - **`AlloCat-Windows-Launcher.bat`**: Double-click on Windows to launch `AlloCat-Standalone.html` (or the live site) inside a frameless desktop window (`--app` mode).
+
+3. **Build a Standalone Windows `.exe` Installer (Electron)**
+   - Package the included Electron wrapper (`electron/main.cjs`):
      ```bash
      npm install --save-dev electron electron-builder
      npm run build
@@ -29,66 +126,18 @@ AlloCat can be installed and run as a **standalone desktop application on Window
 
 ---
 
-## Authentication, Logo Menu & Admin Control Panel
+## Local Development & Build
 
-Before signing in, the entire workspace view is blurred and locked behind a sign-in modal.
+```bash
+# Install dependencies
+npm install
 
-- **Default Login:** `admin`
-- **Default Password:** `admin`
-- **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
-  - **Open Admin Panel (`Manage All`)**: Launches the centralized **Admin Control Panel** modal with six dedicated tabs and Quick Jump shortcuts:
-    1. **People & Team**: Search and browse all team members (sorted `A → Z`), inspect roles, departments, contract types (`Internal`, `External`, `B2B`), and max capacity, or add, edit, and remove team members.
-    2. **Departments**: Create new organizational departments, inline-rename existing departments (automatically updating assigned team members), and remove empty departments.
-    3. **Clients**: Search client organizations, create new client companies directly with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients along with their associated projects.
-    4. **Projects**: Search deliverable projects, view project codes, parent clients, billing status (`Billable` vs `Internal`), and assigned headcount for the active year, or add, edit, and delete projects.
-    5. **Time Off & Leaves**: View all scheduled leaves across team members and years, schedule new time off, or delete existing leave entries.
-    6. **Years & System**: Add/switch/remove planning years, change administrator login credentials, open Import/Export backup tools, or reset the workspace to default demo data.
-  - **Windows & Offline App**: Open the Windows desktop installer and portable bundle generator.
-  - **Change Login & Password**: Verify your current password and set a custom login and password (stored in SQLite `auth_users`), or reset back to the default `admin:admin`.
-  - **Log Out / Lock Workspace**: Immediately lock and blur the workspace view until signed in again.
+# Start Vite dev server (http://localhost:3000)
+npm run dev
 
----
+# Type-check with TypeScript
+npm run lint
 
-## Core Views & Perspectives
-
-AlloCat lets you inspect and edit your organization's staffing plan from four synchronized perspectives, with a pinned header and KPI/filter toolbar so only the matrix table scrolls:
-
-1. **By Clients & Projects (`ClientProjectMatrixView` — First & Default View)**
-   - Opens by default with all deliverable projects **expanded** under their respective client organizations, sorted alphabetically **`A → Z`**.
-   - Tracks monthly total project staffing (`%` and `FTE` equivalents) and headcount assigned to each initiative.
-   - Manage the specific team members assigned to each project and adjust their monthly allocation percentages directly.
-
-2. **By People (`PeopleMatrixView`)**
-   - Displays every team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default, with rows collapsed by default for a clean executive overview) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`).
-   - Expand any person's row (or click **Expand All Rows**) to view and edit their individual project allocations month by month.
-   - Click any monthly summary cell or project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown of where that person is allocated, a visual multi-segment capacity bar, active leave reductions, and quick project switching.
-
-3. **Availability & Leaves (`AvailabilityMatrixView`)**
-   - Tracks scheduled vacations, PTO, sick leave, parental leave, and sabbaticals across the 12-month timeline (collapsed by default for quick scanning).
-   - Automatically calculates each person's **effective monthly capacity** (`Base Capacity − Leave Impact`) and flags months where project bookings exceed reduced availability.
-
-4. **Bench (`BenchMatrixView`)**
-   - Highlights unallocated working capacity (`Effective Capacity − Booked Projects`) for every team member each month.
-   - Includes a quick capacity filter (e.g., `≥ 10%`, `≥ 20%`, `≥ 50%`, or `100% free`) so resource managers can immediately find available staff and assign them to new projects with one click.
-
----
-
-## Key Features
-
-- **Streamlined Header Controls**:
-  - **Planning Year Dropdown**: Switch between active planning years (`2025`, `2026`, `2027`, etc.) or open **+ Manage Years...** directly from the top year selector dropdown.
-  - **Consolidated `+ Add` Menu**: Quickly add **+ Time Off**, **+ Person**, or **+ Project** from a single unified dropdown button alongside **Assign Staff**, **Import / Export**, and **Windows App**.
-- **Default A → Z Alphabetical Sorting**:
-  - Defaults to **`A → Z`** sorting across all views (`Last Name: A → Z` for people and `Clients: A → Z` for clients & projects).
-  - One-click **`A–Z` / `Z–A`** sort toggles in the sticky table headers and toolbar, plus dropdown options for `First Name` or `Original Order`.
-- **Person-Grouped Overtime Alerts Drawer**:
-  - Real-time conflict detection groups all over-allocated months for a team member into a single unified person card.
-  - Includes both per-month **Auto-Cap** buttons and a one-click **Auto-Cap All Months** action per person.
-- **Interactive Cell Popover & Batch Assignment**: Adjust allocations via slider or presets (`0%`, `25%`, `50%`, `75%`, `100%`) and apply changes to a single month, the remainder of the year, or all 12 months.
-- **Inline Comments & Staffing Notes**: Add and edit inline comments directly between names and monthly columns for people, projects, assignments, and leaves.
-- **SQLite-Aligned Import, Export & Pre-Built Templates**:
-  - **SQLite Binary & SQL Dump (`.sqlite` / `.sql`)**: Export or import the complete relational SQLite 3 database binary or DDL+INSERT script, or inspect and query live tables (`v_allocation_months`, `v_person_annual_summary`, and all 8 workspace tables) directly inside the built-in SQL Inspector.
-  - **Per-Table & View-Scoped CSV / JSON Export & Import**: Export or import `.csv` and `.json` files mapped 1:1 to normalized SQLite tables (`people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, `planning_years`) or matrix views (`Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, `All Tables`), with downloadable empty and example templates.
-  - **Standalone Offline HTML App**: Bundle the compiled application and your live SQLite database snapshot into a portable single-file `.html` application.
-- **In-Browser SQLite Persistence (`sql.js` WASM)**: Workspace data and credentials are stored in a normalized relational SQLite database persisted to browser IndexedDB (`allocat_sqlite_idb`) with a `localStorage` backup (`allocat_sqlite_b64_v1`) for seamless offline and GitHub Pages usage.
-- **Dark & Light Mode**: Defaults to **Dark Mode**, with a balanced soft-gray **Light Mode** toggle in the header.
+# Build production bundle to dist/ and sync GitHub Pages assets (docs/assets/ & public/assets/)
+npm run build
+```
