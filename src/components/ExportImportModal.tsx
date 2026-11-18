@@ -22,23 +22,27 @@ import {
   ChevronDown,
   ChevronUp,
   Play,
-  HardDrive
+  HardDrive,
+  Table2,
+  KeyRound,
+  Link2
 } from 'lucide-react';
 import { ViewMode, DEFAULT_LEAVE_TYPE_CONFIG } from '../types';
 import { AppState } from '../data/seedData';
 import {
   ExportScope,
   ImportMergeMode,
-  generatePeopleViewCSV,
-  generateClientsViewCSV,
-  generateAvailabilityViewCSV,
-  generateBenchViewCSV,
-  generateAdminDirectoriesCSV,
-  generateAllViewsCSV,
+  SQLITE_TABLE_SCHEMAS,
+  SQLiteTableName,
+  isTableScope,
+  tableScopeToTableName,
+  generateViewCSV,
   generateViewJSON,
   generateTemplateCSV,
+  generateTemplateJSON,
   importDataFromFileContent,
-  triggerFileDownload
+  triggerFileDownload,
+  triggerBinaryDownload
 } from '../utils/importExportUtils';
 import {
   SQLITE_RELATIONAL_SCHEMA_DDL,
@@ -46,8 +50,8 @@ import {
   getSQLiteDatabaseStats,
   syncAppStateToSQLite,
   exportSQLiteBinaryFile,
-  exportSQLiteBase64Snapshot,
   exportSQLDumpScript,
+  buildStandalonePortableHtml,
   importSQLiteBinaryFile,
   importSQLDumpScript,
   isSQLiteBinaryHeader,
@@ -65,8 +69,8 @@ interface ExportImportModalProps {
   onOpenStandaloneModal?: () => void;
 }
 
-const SCOPE_TABS: Array<{
-  id: ExportScope;
+const VIEW_SCOPE_TABS: Array<{
+  id: Exclude<ExportScope, `table_${string}`>;
   label: string;
   shortLabel: string;
   description: string;
@@ -75,79 +79,65 @@ const SCOPE_TABS: Array<{
 }> = [
   {
     id: 'all',
-    label: 'All Tabs (Full Workspace)',
-    shortLabel: 'All Tabs',
+    label: 'Full Workspace (All 8 Tables)',
+    shortLabel: 'All Tables',
     description:
-      'Complete workspace backup and multi-view master spreadsheet covering Clients, Projects, People, Allocations, Custom Leave Types, Scheduled Leaves, Departments, and Years.',
+      'Complete relational export & import across planning_years, departments, leave_types, clients, projects, people, allocations, and leaves with preserved PK/FK IDs.',
     csvColumnsHint:
-      'Year, Record Type (Department / Leave Type / Client / Project / Person / Allocation / Leave), First Name, Last Name, Role, Department, Employment, Client, Client Status, Project, Leave Category, Leave Type Label, Badge Theme, Impact %, Jan..Dec',
+      'table_name, id, year, is_selected, sort_order, person_id, first_name, last_name, full_name, role, department, employment_type, max_capacity_percent, client_id, client_name, project_id, project_name, code, billable, jan..dec, leave_type, start_month (0..11), end_month (0..11), impact_percent, notes',
     icon: Layers
   },
   {
     id: 'clients',
-    label: 'By Clients & Projects View',
+    label: 'Clients & Projects Matrix',
     shortLabel: 'Clients & Projects',
     description:
-      'Client portfolios, deliverable projects, scope notes, monthly FTE totals, and assigned staff breakdowns.',
+      'Client portfolios, project_summary totals, and staff allocation rows keyed by client_id, project_id, and person_id.',
     csvColumnsHint:
-      'Year, Row Type, Client, Industry, Project, Project Code, Project Status, Billable, Project Scope Comment, First Name, Last Name, Role, Department, Employment, Assignment Note, Jan..Dec',
+      'table_name, id, year, client_id, client_name, industry, project_id, project_name, code, project_status, billable (1/0), person_id, first_name, last_name, full_name, role, department, employment_type, annual_avg_pct, jan..dec, notes',
     icon: Briefcase
   },
   {
     id: 'people',
-    label: 'By People View',
+    label: 'People & Assignments Matrix',
     shortLabel: 'By People',
     description:
-      'Team member capacity summaries, employment type, staffing comments, and project allocation rows across all 12 months.',
+      'Person capacity summaries alongside monthly allocation rows keyed by person_id and project_id.',
     csvColumnsHint:
-      'Year, Row Type, First Name, Last Name, Role, Department, Employment (Internal/External/B2B), Max Capacity %, Person Comment, Client, Project, Project Code, Assignment Note, Jan..Dec',
+      'table_name, id, year, person_id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, client_id, client_name, project_id, project_name, code, annual_avg_pct, jan..dec, notes',
     icon: Users
   },
   {
     id: 'availability',
-    label: 'Availability & Leaves View',
+    label: 'Availability & Leaves Matrix',
     shortLabel: 'Availability & Leaves',
     description:
-      'Custom & default Time Off / Leave Type definitions, effective monthly working capacities, and scheduled leave entries.',
+      'Configured leave_types, effective monthly working capacities, and scheduled leave rows using 0-based start_month/end_month (0..11).',
     csvColumnsHint:
-      'Year, Row Type (Leave Type / Effective Capacity / Leave Entry), First Name, Last Name, Role, Department, Employment, Max Capacity %, Leave Category, Leave Type Label, Badge Theme, Leave Title, Start Month, End Month, Impact %, Leave Note, Jan..Dec',
+      'table_name, id, year, person_id, first_name, last_name, full_name, leave_type, label, badge_class, icon_name, default_impact, title, start_month (0..11), end_month (0..11), impact_percent, jan..dec, notes',
     icon: CalendarOff
   },
   {
     id: 'bench',
-    label: 'Bench View',
+    label: 'Bench Availability View',
     shortLabel: 'Bench',
     description:
-      'Unallocated bench capacity percentages, free months count, and team member skills / bench notes.',
+      'Unallocated monthly bench percentages, free months counts, and person_id roster metadata.',
     csvColumnsHint:
-      'Year, Row Type, First Name, Last Name, Role, Department, Employment (Internal/External/B2B), Email, Max Capacity %, Skills & Bench Comment, Avg Bench %, Free Months, Jan..Dec',
+      'table_name, id, year, person_id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, avg_bench_pct, free_months_count, jan..dec, notes',
     icon: Armchair
   },
   {
     id: 'admin',
-    label: 'Admin Panel & Directories',
-    shortLabel: 'Admin & Directories',
+    label: 'Admin Directories (No Matrix Facts)',
+    shortLabel: 'Admin Directories',
     description:
-      'Centralized Admin Control Panel directories: Departments, Custom Time Off & Leave Types, Client Companies, Deliverable Projects, Team Members, and Scheduled Leaves.',
+      'Core relational directories without monthly allocation rows: planning_years, departments, leave_types, clients, projects, people, and leaves.',
     csvColumnsHint:
-      'Year, Record Type (Department / Leave Type / Client / Project / Person / Leave), First Name, Last Name, Role, Department, Employment, Email, Max Capacity %, Client, Industry, Client Status, Project, Project Code, Leave Category, Leave Type Label, Badge Theme, Impact %',
+      'table_name, id, year, is_selected, sort_order, person_id, first_name, last_name, full_name, department, client_id, client_name, project_id, code, billable, leave_type, label, badge_class, start_month, end_month, impact_percent, notes',
     icon: ShieldCheck
   }
 ];
-
-function triggerBinaryDownload(bytes: Uint8Array, filename: string, mimeType: string) {
-  const copy = new Uint8Array(bytes.byteLength);
-  copy.set(bytes);
-  const blob = new Blob([copy.buffer], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
 
 export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   isOpen,
@@ -162,6 +152,9 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedScope, setSelectedScope] = useState<ExportScope>(
     initialScope || activeViewMode || 'all'
+  );
+  const [scopeGroup, setScopeGroup] = useState<'tables' | 'views'>(() =>
+    initialScope && isTableScope(initialScope) ? 'tables' : 'tables'
   );
   const [mergeMode, setMergeMode] = useState<ImportMergeMode>('merge');
   const [status, setStatus] = useState<{
@@ -186,7 +179,9 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setSelectedScope(initialScope || activeViewMode || 'all');
+      const nextInitial = initialScope || activeViewMode || 'all';
+      setSelectedScope(nextInitial);
+      setScopeGroup(isTableScope(nextInitial) ? 'tables' : 'views');
       setStatus(null);
       setSqlQueryResult(null);
       syncAppStateToSQLite(appState).then((stats) => setSqliteStats(stats));
@@ -195,8 +190,27 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
 
   if (!isOpen) return null;
 
-  const currentTabConfig =
-    SCOPE_TABS.find((t) => t.id === selectedScope) || SCOPE_TABS[0];
+  const isSelectedTable = isTableScope(selectedScope);
+  const activeTableSchema = isSelectedTable
+    ? SQLITE_TABLE_SCHEMAS.find((t) => t.scope === selectedScope) || SQLITE_TABLE_SCHEMAS[0]
+    : null;
+  const activeViewConfig = !isSelectedTable
+    ? VIEW_SCOPE_TABS.find((t) => t.id === selectedScope) || VIEW_SCOPE_TABS[0]
+    : null;
+
+  const activeScopeTitle = activeTableSchema
+    ? `Table: ${activeTableSchema.tableName}`
+    : activeViewConfig?.label || 'Full Workspace';
+  const activeScopeShort = activeTableSchema
+    ? activeTableSchema.tableName
+    : activeViewConfig?.shortLabel || 'All Tables';
+  const activeScopeDescription = activeTableSchema
+    ? activeTableSchema.description
+    : activeViewConfig?.description || '';
+  const activeColumnsHint = activeTableSchema
+    ? activeTableSchema.columns.join(', ')
+    : activeViewConfig?.csvColumnsHint || '';
+
   const dateStr = new Date().toISOString().slice(0, 10);
   const leaveTypesCount = Object.keys(
     appState.leaveTypes || DEFAULT_LEAVE_TYPE_CONFIG
@@ -206,6 +220,29 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     sqliteStats.byteSize > 0
       ? `${(sqliteStats.byteSize / 1024).toFixed(1)} KB`
       : 'Syncing...';
+
+  const getRowCountForTable = (tableName: SQLiteTableName): number => {
+    const stat = sqliteStats.tables.find((t) => t.tableName === tableName);
+    if (stat) return stat.rowCount;
+    switch (tableName) {
+      case 'people':
+        return appState.people.length;
+      case 'clients':
+        return appState.clients.length;
+      case 'projects':
+        return appState.projects.length;
+      case 'allocations':
+        return appState.allocations.length;
+      case 'leaves':
+        return appState.leaves.length;
+      case 'departments':
+        return appState.departments.length;
+      case 'leave_types':
+        return leaveTypesCount;
+      case 'planning_years':
+        return appState.availableYears.length;
+    }
+  };
 
   const handleExportSQLiteBinary = async () => {
     setIsExportingSqlite(true);
@@ -272,64 +309,11 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     }
   };
 
-  // Download self-contained single-file HTML browser app with current state embedded
   const handleDownloadStandaloneHTML = async () => {
     setIsBundlingHtml(true);
     setStatus(null);
     try {
-      const fetchAssetText = async (paths: string[]) => {
-        for (const p of paths) {
-          try {
-            const res = await fetch(p);
-            if (res.ok) {
-              const text = await res.text();
-              if (text && !text.trim().startsWith('<!DOCTYPE html>')) {
-                return text;
-              }
-            }
-          } catch {
-            // try next path
-          }
-        }
-        return null;
-      };
-
-      const cssText = await fetchAssetText([
-        './assets/app.css',
-        './docs/assets/app.css',
-        '/AlloCat/assets/app.css',
-        '/AlloCat/docs/assets/app.css'
-      ]);
-      const jsText = await fetchAssetText([
-        './assets/app.js',
-        './docs/assets/app.js',
-        '/AlloCat/assets/app.js',
-        '/AlloCat/docs/assets/app.js'
-      ]);
-
-      if (!jsText) {
-        throw new Error('Compiled bundle not found');
-      }
-
-      const sqliteBase64 = await exportSQLiteBase64Snapshot(appState);
-
-      const standaloneHtml = `<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AlloCat — Resource & Capacity Planner (${dateStr})</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>${cssText || ''}</style>
-</head>
-<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
-  <div id="root"></div>
-  <script>window.__ALLOCAT_EMBEDDED_SQLITE__ = ${JSON.stringify(sqliteBase64)};</script>
-  <script type="module">${jsText}</script>
-</body>
-</html>`;
+      const standaloneHtml = await buildStandalonePortableHtml(appState);
 
       triggerFileDownload(
         standaloneHtml,
@@ -340,7 +324,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
       setStatus({
         type: 'success',
         message:
-          'Standalone browser app downloaded! Double-click that .html file to run AlloCat directly in any browser with your current data.'
+          'Standalone browser app downloaded! Double-click that .html file to run AlloCat directly in any browser with your current SQLite database embedded.'
       });
     } catch {
       setStatus({
@@ -352,73 +336,37 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
     }
   };
 
+  const getScopeFileSlug = (scope: ExportScope): string => {
+    if (isTableScope(scope)) {
+      return `table-${tableScopeToTableName(scope)}`;
+    }
+    if (scope === 'all') return 'all-tables-master';
+    if (scope === 'clients') return 'clients-projects';
+    if (scope === 'availability') return 'availability-leaves';
+    if (scope === 'admin') return 'admin-directories';
+    return scope;
+  };
+
   const handleExportScopeCSV = (scope: ExportScope) => {
     const yr = appState.selectedYear;
-    if (scope === 'people') {
-      const csv = generatePeopleViewCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-by-people-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
+    const csv = generateViewCSV(appState, scope);
+    const slug = getScopeFileSlug(scope);
+    triggerFileDownload(
+      csv,
+      `allocat-${slug}-${yr}-${dateStr}.csv`,
+      'text/csv;charset=utf-8;'
+    );
+    if (isTableScope(scope)) {
+      const tbl = tableScopeToTableName(scope);
       setStatus({
         type: 'success',
-        message: `Exported "By People" view (${appState.people.length} team members) to CSV.`
-      });
-    } else if (scope === 'clients') {
-      const csv = generateClientsViewCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-by-clients-projects-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
-      setStatus({
-        type: 'success',
-        message: `Exported "By Clients & Projects" view (${appState.clients.length} clients, ${appState.projects.length} projects) to CSV.`
-      });
-    } else if (scope === 'availability') {
-      const csv = generateAvailabilityViewCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-availability-leaves-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
-      setStatus({
-        type: 'success',
-        message: `Exported "Availability & Leaves" view (${leaveTypesCount} leave types, ${appState.leaves.filter((l) => l.year === yr).length} scheduled leaves) to CSV.`
-      });
-    } else if (scope === 'bench') {
-      const csv = generateBenchViewCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-bench-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
-      setStatus({
-        type: 'success',
-        message: `Exported "Bench" availability view (${appState.people.length} team members) to CSV.`
-      });
-    } else if (scope === 'admin') {
-      const csv = generateAdminDirectoriesCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-admin-directories-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
-      setStatus({
-        type: 'success',
-        message: `Exported "Admin & Directories" CSV (${appState.departments.length} departments, ${leaveTypesCount} leave types, ${appState.clients.length} clients, ${appState.projects.length} projects, ${appState.people.length} people).`
+        message: `Exported SQLite table "${tbl}" (${getRowCountForTable(tbl)} rows) with exact schema columns to CSV.`
       });
     } else {
-      const csv = generateAllViewsCSV(appState);
-      triggerFileDownload(
-        csv,
-        `allocat-all-views-master-${yr}-${dateStr}.csv`,
-        'text/csv;charset=utf-8;'
-      );
+      const tabCfg = VIEW_SCOPE_TABS.find((t) => t.id === scope);
       setStatus({
         type: 'success',
-        message: `Exported All Views Master CSV (${appState.departments.length} departments, ${leaveTypesCount} leave types, ${appState.clients.length} clients, ${appState.projects.length} projects, ${appState.people.length} people, ${appState.allocations.length} allocations, ${appState.leaves.length} leaves).`
+        message: `Exported "${tabCfg?.shortLabel || scope}" relational CSV (${yr}).`
       });
     }
   };
@@ -426,20 +374,18 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   const handleExportScopeJSON = (scope: ExportScope) => {
     const yr = appState.selectedYear;
     const json = generateViewJSON(appState, scope);
+    const slug = getScopeFileSlug(scope);
     const filename =
       scope === 'all'
-        ? `allocat-full-backup-${dateStr}.json`
-        : scope === 'admin'
-        ? `allocat-admin-directories-${yr}-${dateStr}.json`
-        : `allocat-${scope}-${yr}-${dateStr}.json`;
+        ? `allocat-full-workspace-${dateStr}.json`
+        : `allocat-${slug}-${yr}-${dateStr}.json`;
 
     triggerFileDownload(json, filename, 'application/json');
     setStatus({
       type: 'success',
-      message:
-        scope === 'all'
-          ? 'Exported Full Workspace Backup (.JSON) including all views, departments, and custom leave types.'
-          : `Exported "${currentTabConfig.shortLabel}" data (.JSON).`
+      message: isTableScope(scope)
+        ? `Exported SQLite table "${tableScopeToTableName(scope)}" JSON (schemaVersion: 2).`
+        : `Exported "${activeScopeShort}" SQLite-aligned JSON backup (schemaVersion: 2).`
     });
   };
 
@@ -449,29 +395,41 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   ) => {
     const yr = appState.selectedYear;
     const csv = generateTemplateCSV(scope, yr, includeExampleRows);
-    const tabInfo = SCOPE_TABS.find((t) => t.id === scope) || SCOPE_TABS[0];
-    const suffix = includeExampleRows ? 'example-template' : 'empty-template';
-    const scopeSlug =
-      scope === 'all'
-        ? 'all-views'
-        : scope === 'clients'
-        ? 'clients-projects'
-        : scope === 'availability'
-        ? 'availability-leaves'
-        : scope === 'admin'
-        ? 'admin-directories'
-        : scope;
+    const suffix = includeExampleRows ? 'example-template' : 'empty-schema';
+    const slug = getScopeFileSlug(scope);
 
     triggerFileDownload(
       csv,
-      `allocat-${scopeSlug}-${suffix}-${yr}.csv`,
+      `allocat-${slug}-${suffix}-${yr}.csv`,
       'text/csv;charset=utf-8;'
     );
+    const targetName = isTableScope(scope)
+      ? `table "${tableScopeToTableName(scope)}"`
+      : VIEW_SCOPE_TABS.find((t) => t.id === scope)?.shortLabel || scope;
+
     setStatus({
       type: 'success',
       message: includeExampleRows
-        ? `Downloaded pre-built "${tabInfo.shortLabel}" example template (.CSV). Fill in your rows and import it below!`
-        : `Downloaded empty "${tabInfo.shortLabel}" template (.CSV) with headers ready to fill.`
+        ? `Downloaded SQLite-aligned example CSV template for ${targetName}. Edit rows and upload below.`
+        : `Downloaded blank CSV schema headers for ${targetName}.`
+    });
+  };
+
+  const handleDownloadTemplateJSON = (scope: ExportScope) => {
+    const yr = appState.selectedYear;
+    const json = generateTemplateJSON(scope, yr);
+    const slug = getScopeFileSlug(scope);
+    triggerFileDownload(
+      json,
+      `allocat-${slug}-template-${yr}.json`,
+      'application/json'
+    );
+    const targetName = isTableScope(scope)
+      ? `table "${tableScopeToTableName(scope)}"`
+      : VIEW_SCOPE_TABS.find((t) => t.id === scope)?.shortLabel || scope;
+    setStatus({
+      type: 'success',
+      message: `Downloaded SQLite-aligned JSON template for ${targetName} (schemaVersion: 2).`
     });
   };
 
@@ -561,7 +519,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                 SQLite Database, Import & Export Center ({appState.selectedYear})
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Normalized in-browser SQLite 3 relational storage alongside CSV spreadsheets and JSON backups
+                Normalized SQLite 3 relational tables with aligned CSV templates, JSON schemas, and SQL dumps
               </p>
             </div>
           </div>
@@ -573,54 +531,124 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
           </button>
         </div>
 
-        {/* Scope Selector Tabs */}
-        <div className="px-5 pt-3 pb-2.5 bg-slate-50/60 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-              Select Module / View for CSV & JSON:
-            </span>
+        {/* Scope Mode Switcher (SQLite Tables vs Matrix Views) */}
+        <div className="px-5 pt-3 pb-3 bg-slate-50/60 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 shrink-0 space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={() => {
+                  setScopeGroup('tables');
+                  if (!isTableScope(selectedScope)) {
+                    setSelectedScope('table_people');
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                  scopeGroup === 'tables'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Table2 className="w-3.5 h-3.5" />
+                <span>SQLite Tables (Normalized)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setScopeGroup('views');
+                  if (isTableScope(selectedScope)) {
+                    setSelectedScope('all');
+                  }
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer ${
+                  scopeGroup === 'views'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Views & Full Workspace</span>
+              </button>
+            </div>
+
             <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono tabular-nums text-slate-500 dark:text-slate-400">
               <span className="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
-                {appState.clients.length} Clients
+                {appState.people.length} people
               </span>
               <span className="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
-                {appState.projects.length} Projects
+                {appState.clients.length} clients
               </span>
               <span className="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
-                {appState.people.length} People
+                {appState.projects.length} projects
               </span>
               <span className="px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
-                {appState.departments.length} Depts
+                {appState.allocations.length} allocations
               </span>
               <span className="px-1.5 py-0.5 rounded bg-purple-100/80 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300">
-                {leaveTypesCount} Leave Types
+                {appState.leaves.length} leaves
               </span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
-            {SCOPE_TABS.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = selectedScope === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedScope(tab.id);
-                    setStatus(null);
-                  }}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border ${
-                    isActive
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-semibold'
-                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{tab.shortLabel}</span>
-                </button>
-              );
-            })}
-          </div>
+
+          {scopeGroup === 'tables' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+              {SQLITE_TABLE_SCHEMAS.map((tbl) => {
+                const isActive = selectedScope === tbl.scope;
+                const count = getRowCountForTable(tbl.tableName);
+                return (
+                  <button
+                    key={tbl.scope}
+                    type="button"
+                    onClick={() => {
+                      setSelectedScope(tbl.scope);
+                      setStatus(null);
+                    }}
+                    className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-all cursor-pointer border ${
+                      isActive
+                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs font-semibold'
+                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                    }`}
+                  >
+                    <span className="font-mono text-[11px] truncate">{tbl.tableName}</span>
+                    <span
+                      className={`text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded ${
+                        isActive
+                          ? 'bg-indigo-500 text-white'
+                          : 'bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400'
+                      }`}
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {VIEW_SCOPE_TABS.map((tab) => {
+                const Icon = tab.icon;
+                const isActive = selectedScope === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedScope(tab.id);
+                      setStatus(null);
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer border ${
+                      isActive
+                        ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-semibold'
+                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Icon className="w-3.5 h-3.5" />
+                    <span>{tab.shortLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Body */}
@@ -660,7 +688,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                  All edits automatically synchronize into 10 normalized relational tables persisted locally in IndexedDB and compatible with standard SQLite 3 desktop tools.
+                  All changes synchronize into 10 normalized relational tables persisted in IndexedDB. Click any data table below to inspect, export CSV/JSON, or download its template.
                 </p>
               </div>
 
@@ -679,21 +707,49 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
               </button>
             </div>
 
-            {/* Live Table Row Counts */}
+            {/* Live Clickable Table Row Counts */}
             <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
-              {sqliteStats.tables.map((t) => (
-                <div
-                  key={t.tableName}
-                  className="px-2 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-700/70 flex flex-col"
-                >
-                  <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
-                    {t.tableName}
-                  </span>
-                  <span className="text-xs font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
-                    {t.rowCount}
-                  </span>
-                </div>
-              ))}
+              {sqliteStats.tables.map((t) => {
+                const matchingSchema = SQLITE_TABLE_SCHEMAS.find(
+                  (s) => s.tableName === t.tableName
+                );
+                const isSelected = Boolean(
+                  matchingSchema && selectedScope === matchingSchema.scope
+                );
+                return (
+                  <button
+                    key={t.tableName}
+                    type="button"
+                    disabled={!matchingSchema}
+                    onClick={() => {
+                      if (matchingSchema) {
+                        setScopeGroup('tables');
+                        setSelectedScope(matchingSchema.scope);
+                        setStatus(null);
+                      }
+                    }}
+                    className={`px-2.5 py-1.5 rounded-lg border text-left flex flex-col transition-all ${
+                      matchingSchema ? 'cursor-pointer' : 'cursor-default opacity-80'
+                    } ${
+                      isSelected
+                        ? 'bg-indigo-50 dark:bg-indigo-950/70 border-indigo-400 dark:border-indigo-600'
+                        : 'bg-white dark:bg-slate-900 border-slate-200/80 dark:border-slate-700/70 hover:border-indigo-400/70'
+                    }`}
+                    title={
+                      matchingSchema
+                        ? `Select "${t.tableName}" table for CSV/JSON export & templates`
+                        : 'Internal SQLite system table'
+                    }
+                  >
+                    <span className="text-[10px] font-mono text-slate-500 dark:text-slate-400 truncate">
+                      {t.tableName}
+                    </span>
+                    <span className="text-xs font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                      {t.rowCount}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Expandable Schema DDL & Live Read-Only Query Inspector */}
@@ -886,20 +942,38 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
             </div>
           </div>
 
-          {/* Selected Scope Banner & Export Actions (CSV + JSON) */}
+          {/* Selected Table or View Export Actions */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3.5">
-            <div className="flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex items-center gap-2">
-                  <span>Export: {currentTabConfig.label}</span>
+                <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide flex flex-wrap items-center gap-2">
+                  <span>Export: {activeScopeTitle}</span>
                   <span className="text-[10px] font-mono tabular-nums px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
                     {appState.selectedYear}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
-                  {currentTabConfig.description}
+                  {activeScopeDescription}
                 </p>
               </div>
+
+              {activeTableSchema && (
+                <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono">
+                  <span className="px-2 py-0.5 rounded bg-amber-100/80 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200/80 dark:border-amber-800 flex items-center gap-1">
+                    <KeyRound className="w-2.5 h-2.5" />
+                    <span>PK: {activeTableSchema.primaryKey}</span>
+                  </span>
+                  {activeTableSchema.foreignKeys.map((fk) => (
+                    <span
+                      key={fk}
+                      className="px-2 py-0.5 rounded bg-slate-200/70 dark:bg-slate-800 text-slate-700 dark:text-slate-300 flex items-center gap-1"
+                    >
+                      <Link2 className="w-2.5 h-2.5" />
+                      <span>FK: {fk}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -913,10 +987,10 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                    Export {currentTabConfig.shortLabel} (.CSV)
+                    Export {activeScopeShort} (.CSV)
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Spreadsheet table ready for Excel, Google Sheets, or re-importing.
+                    SQLite-aligned CSV with exact primary/foreign keys for spreadsheet round-trips.
                   </p>
                 </div>
               </button>
@@ -931,61 +1005,54 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                 </div>
                 <div>
                   <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                    Export {currentTabConfig.shortLabel} (.JSON)
+                    Export {activeScopeShort} (.JSON)
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Structured JSON data for {currentTabConfig.shortLabel.toLowerCase()}.
+                    Normalized schemaVersion 2 JSON payload aligned with SQLite column names.
                   </p>
                 </div>
               </button>
             </div>
 
-            {/* Quick 1-click CSV buttons for all individual modules when on "All Tabs" */}
-            {selectedScope === 'all' && (
-              <div className="pt-2 border-t border-slate-200/80 dark:border-slate-700/70">
-                <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-2">
-                  Or quick-export individual module spreadsheets (.CSV):
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                  {(
-                    [
-                      { id: 'clients', label: 'Clients & Projects' },
-                      { id: 'people', label: 'By People' },
-                      { id: 'availability', label: 'Leaves & Types' },
-                      { id: 'bench', label: 'Bench View' },
-                      { id: 'admin', label: 'Admin Directories' }
-                    ] as const
-                  ).map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => handleExportScopeCSV(item.id)}
-                      className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-emerald-500 text-slate-700 dark:text-slate-300 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </button>
-                  ))}
-                </div>
+            {/* Quick 1-click CSV export strip for all 8 SQLite tables */}
+            <div className="pt-2 border-t border-slate-200/80 dark:border-slate-700/70">
+              <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-2">
+                Quick-export individual SQLite table (.CSV):
               </div>
-            )}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                {SQLITE_TABLE_SCHEMAS.map((tbl) => (
+                  <button
+                    key={tbl.scope}
+                    type="button"
+                    onClick={() => handleExportScopeCSV(tbl.scope)}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-mono bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:border-emerald-500 text-slate-700 dark:text-slate-300 flex items-center justify-between gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <span className="flex items-center gap-1.5 truncate">
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <span className="truncate">{tbl.tableName}.csv</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 tabular-nums">
+                      {getRowCountForTable(tbl.tableName)}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
 
-          {/* Unified Import Section (.SQLITE, .DB, .SQL, .CSV, .JSON) */}
+          {/* Unified Import & Aligned Templates Section */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100 uppercase tracking-wide">
-                  Unified Import (.SQLITE / .DB / .SQL / .CSV / .JSON)
+                  Unified Import & Aligned Templates (.SQLITE / .DB / .SQL / .CSV / .JSON)
                 </h3>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                  Upload any SQLite binary (<code className="font-mono">.sqlite</code>,{' '}
-                  <code className="font-mono">.db</code>), <code className="font-mono">.sql</code> dump script,{' '}
-                  <code className="font-mono">.csv</code> spreadsheet, or <code className="font-mono">.json</code> backup into{' '}
-                  <span className="font-medium text-slate-700 dark:text-slate-300">
-                    {currentTabConfig.shortLabel}
-                  </span>
-                  .
+                  Auto-detects SQLite binaries, SQL dumps, per-table CSVs, or multi-table exports into{' '}
+                  <span className="font-medium font-mono text-slate-700 dark:text-slate-300">
+                    {activeScopeShort}
+                  </span>{' '}
+                  with foreign-key validation.
                 </p>
               </div>
 
@@ -999,7 +1066,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                       ? 'bg-blue-600 text-white font-semibold'
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
-                  title="Update matching rows and add new ones without deleting unrelated records"
+                  title="Upsert matching primary/foreign key rows and add new records without removing unrelated rows"
                 >
                   Merge & Update
                 </button>
@@ -1011,30 +1078,30 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                       ? 'bg-amber-600 text-white font-semibold'
                       : 'text-slate-600 dark:text-slate-400'
                   }`}
-                  title="Replace existing records with the imported database or file"
+                  title="Replace target table or workspace records with imported file contents and enforce FK integrity"
                 >
                   Replace Existing
                 </button>
               </div>
             </div>
 
-            <div className="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-700/70 text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+            <div className="p-2.5 rounded-lg bg-white/80 dark:bg-slate-900/70 border border-slate-200/70 dark:border-slate-700/70 text-[11px] text-slate-500 dark:text-slate-400 font-mono leading-relaxed">
               <span className="font-semibold text-slate-700 dark:text-slate-300 font-sans">
-                Supported CSV columns:{' '}
+                Aligned Database Columns ({activeScopeShort}):{' '}
               </span>
-              {currentTabConfig.csvColumnsHint}
+              {activeColumnsHint}
             </div>
 
-            {/* Pre-built CSV Template Downloads inside Import Section */}
+            {/* Aligned Import Templates (CSV Example, CSV Empty Schema, JSON Template) */}
             <div className="p-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700/80 space-y-2.5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
                   <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
                     <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>Pre-built CSV Import Templates ({currentTabConfig.shortLabel})</span>
+                    <span>SQLite-Aligned Import Templates ({activeScopeShort})</span>
                   </div>
                   <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                    Download a ready-to-fill CSV template with the exact column headers for this module.
+                    Pre-built CSV & JSON templates matching the exact SQLite table columns and ID relationships.
                   </p>
                 </div>
 
@@ -1043,45 +1110,78 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                     type="button"
                     onClick={() => handleDownloadTemplateCSV(selectedScope, true)}
                     className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-950/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/70 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/80 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    title="Download CSV template pre-populated with example rows showing the format"
+                    title="Download CSV template populated with realistic SQLite example rows"
                   >
                     <Download className="w-3 h-3" />
-                    <span>Example Template (.CSV)</span>
+                    <span>Example (.CSV)</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => handleDownloadTemplateCSV(selectedScope, false)}
                     className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
-                    title="Download blank CSV template containing only the column headers"
+                    title="Download blank CSV template containing only exact SQLite column headers"
                   >
                     <Download className="w-3 h-3" />
                     <span>Empty Headers (.CSV)</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadTemplateJSON(selectedScope)}
+                    className="px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Download schemaVersion 2 JSON template aligned with SQLite column names"
+                  >
+                    <FileJson className="w-3 h-3" />
+                    <span>Schema (.JSON)</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Quick links for all tab templates */}
-              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mr-1">
-                  All module templates:
-                </span>
-                {SCOPE_TABS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => handleDownloadTemplateCSV(t.id, true)}
-                    className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer flex items-center gap-1 ${
-                      selectedScope === t.id
-                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
-                        : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-400'
-                    }`}
-                    title={`Download ${t.label} example CSV template`}
-                  >
-                    <Download className="w-2.5 h-2.5" />
-                    <span>{t.shortLabel}</span>
-                  </button>
-                ))}
+              {/* Quick table & view template strip */}
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mr-1">
+                    SQLite table templates:
+                  </span>
+                  {SQLITE_TABLE_SCHEMAS.map((tbl) => (
+                    <button
+                      key={tbl.scope}
+                      type="button"
+                      onClick={() => handleDownloadTemplateCSV(tbl.scope, true)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-colors cursor-pointer flex items-center gap-1 ${
+                        selectedScope === tbl.scope
+                          ? 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-300 dark:border-indigo-700'
+                          : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-indigo-400'
+                      }`}
+                      title={`Download ${tbl.tableName} SQLite CSV example template`}
+                    >
+                      <Download className="w-2.5 h-2.5" />
+                      <span>{tbl.tableName}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mr-1">
+                    Matrix view templates:
+                  </span>
+                  {VIEW_SCOPE_TABS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => handleDownloadTemplateCSV(t.id, true)}
+                      className={`px-2 py-0.5 rounded text-[10px] font-medium border transition-colors cursor-pointer flex items-center gap-1 ${
+                        selectedScope === t.id
+                          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800'
+                          : 'bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-blue-400'
+                      }`}
+                      title={`Download ${t.label} CSV example template`}
+                    >
+                      <Download className="w-2.5 h-2.5" />
+                      <span>{t.shortLabel}</span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -1120,7 +1220,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                  Bundle AlloCat and your current workspace state (including custom leave types and departments) into a single self-contained{' '}
+                  Bundle AlloCat and your current SQLite workspace into a single self-contained{' '}
                   <code className="text-indigo-200 font-mono">.html</code> file, or open the Windows Desktop App installer center.
                 </p>
               </div>

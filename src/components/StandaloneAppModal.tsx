@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { AppState } from '../data/seedData';
 import { triggerFileDownload } from '../utils/importExportUtils';
-import { exportSQLiteBase64Snapshot } from '../utils/sqliteDatabase';
+import { buildStandalonePortableHtml } from '../utils/sqliteDatabase';
 import { usePWAInstall } from '../utils/usePWAInstall';
 
 interface StandaloneAppModalProps {
@@ -38,78 +38,11 @@ export const StandaloneAppModal: React.FC<StandaloneAppModalProps> = ({
 
   if (!isOpen) return null;
 
-  const dateStr = new Date().toISOString().slice(0, 10);
-
-  const buildStandaloneHtmlString = async (): Promise<string> => {
-    const fetchAssetText = async (paths: string[]) => {
-      for (const p of paths) {
-        try {
-          const res = await fetch(p);
-          if (res.ok) {
-            const text = await res.text();
-            if (
-              text &&
-              !text.trim().startsWith('<!DOCTYPE html>') &&
-              !text.trim().startsWith('<!doctype html>')
-            ) {
-              return text;
-            }
-          }
-        } catch {
-          // try next path
-        }
-      }
-      return null;
-    };
-
-    const cssText = await fetchAssetText([
-      './assets/app.css',
-      './docs/assets/app.css',
-      '/assets/app.css',
-      '/docs/assets/app.css',
-      '/AlloCat/assets/app.css',
-      '/AlloCat/docs/assets/app.css'
-    ]);
-    const jsText = await fetchAssetText([
-      './assets/app.js',
-      './docs/assets/app.js',
-      '/assets/app.js',
-      '/docs/assets/app.js',
-      '/AlloCat/assets/app.js',
-      '/AlloCat/docs/assets/app.js'
-    ]);
-
-    if (!jsText) {
-      throw new Error('Compiled application bundle not found.');
-    }
-
-    const sqliteBase64 = await exportSQLiteBase64Snapshot(appState);
-
-    return `<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AlloCat — Resource & Capacity Planner (${dateStr})</title>
-  <meta name="theme-color" content="#4F46E5" />
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <style>${cssText || ''}</style>
-</head>
-<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased selection:bg-indigo-600 selection:text-white">
-  <div id="root"></div>
-  <script>window.__ALLOCAT_EMBEDDED_SQLITE__ = ${JSON.stringify(sqliteBase64)};</script>
-  <script type="module">${jsText}</script>
-</body>
-</html>`;
-  };
-
   const handleDownloadPortableHTML = async () => {
     setIsBundlingHtml(true);
     setStatus(null);
     try {
-      const html = await buildStandaloneHtmlString();
+      const html = await buildStandalonePortableHtml(appState);
       triggerFileDownload(
         html,
         `AlloCat-Standalone.html`,

@@ -1283,12 +1283,27 @@ function mergeImportedState(
   for (const l of currentState.leaves) leavesMap.set(l.id, l);
   for (const l of imported.leaves) leavesMap.set(l.id, l);
 
+  const mergedPeople = Array.from(peopleMap.values());
+  const mergedClients = Array.from(clientsMap.values());
+  const clientIdSet = new Set(mergedClients.map((c) => c.id));
+  const mergedProjects = Array.from(projectsMap.values()).filter((pr) =>
+    clientIdSet.has(pr.clientId)
+  );
+  const personIdSet = new Set(mergedPeople.map((p) => p.id));
+  const projectIdSet = new Set(mergedProjects.map((pr) => pr.id));
+  const mergedAllocations = Array.from(allocationsMap.values()).filter(
+    (a) => personIdSet.has(a.personId) && projectIdSet.has(a.projectId)
+  );
+  const mergedLeaves = Array.from(leavesMap.values()).filter((l) =>
+    personIdSet.has(l.personId)
+  );
+
   const nextState: AppState = {
-    people: Array.from(peopleMap.values()),
-    clients: Array.from(clientsMap.values()),
-    projects: Array.from(projectsMap.values()),
-    allocations: Array.from(allocationsMap.values()),
-    leaves: Array.from(leavesMap.values()),
+    people: mergedPeople,
+    clients: mergedClients,
+    projects: mergedProjects,
+    allocations: mergedAllocations,
+    leaves: mergedLeaves,
     availableYears,
     selectedYear: availableYears.includes(currentState.selectedYear)
       ? currentState.selectedYear
@@ -1378,3 +1393,72 @@ export async function runReadOnlySQLQuery(
     rows: results[0].values
   };
 }
+
+export async function buildStandalonePortableHtml(state: AppState): Promise<string> {
+  const fetchAssetText = async (paths: string[]): Promise<string | null> => {
+    for (const p of paths) {
+      try {
+        const res = await fetch(p);
+        if (res.ok) {
+          const text = await res.text();
+          if (
+            text &&
+            !text.trim().startsWith('<!DOCTYPE html>') &&
+            !text.trim().startsWith('<!doctype html>')
+          ) {
+            return text;
+          }
+        }
+      } catch {
+        // try next path
+      }
+    }
+    return null;
+  };
+
+  const [cssText, jsText, sqliteBase64] = await Promise.all([
+    fetchAssetText([
+      './assets/app.css',
+      './docs/assets/app.css',
+      '/assets/app.css',
+      '/docs/assets/app.css',
+      '/AlloCat/assets/app.css',
+      '/AlloCat/docs/assets/app.css'
+    ]),
+    fetchAssetText([
+      './assets/app.js',
+      './docs/assets/app.js',
+      '/assets/app.js',
+      '/docs/assets/app.js',
+      '/AlloCat/assets/app.js',
+      '/AlloCat/docs/assets/app.js'
+    ]),
+    exportSQLiteBase64Snapshot(state)
+  ]);
+
+  if (!jsText) {
+    throw new Error('Compiled application bundle not found.');
+  }
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+
+  return `<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AlloCat — Resource & Capacity Planner (${dateStr})</title>
+  <meta name="theme-color" content="#4F46E5" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap" rel="stylesheet">
+  <style>${cssText || ''}</style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased font-sans selection:bg-indigo-600 selection:text-white">
+  <div id="root"></div>
+  <script>window.__ALLOCAT_EMBEDDED_SQLITE__ = ${JSON.stringify(sqliteBase64)};</script>
+  <script type="module">${jsText}</script>
+</body>
+</html>`;
+}
+

@@ -491,7 +491,6 @@ export interface AppState {
 
 declare global {
   interface Window {
-    __ALLOCAT_EMBEDDED_STATE__?: AppState;
     __ALLOCAT_EMBEDDED_SQLITE__?: string;
   }
 }
@@ -581,10 +580,6 @@ export function normalizeAppStatePayload(parsed: Partial<AppState> | null | unde
 }
 
 export function getDefaultAppState(): AppState {
-  if (typeof window !== 'undefined' && window.__ALLOCAT_EMBEDDED_STATE__) {
-    const normalized = normalizeAppStatePayload(window.__ALLOCAT_EMBEDDED_STATE__);
-    if (normalized) return normalized;
-  }
   const defaultLeaveTypes = { ...DEFAULT_LEAVE_TYPE_CONFIG };
   syncLeaveTypeConfigRegistry(defaultLeaveTypes);
   return {

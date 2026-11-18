@@ -44,7 +44,7 @@ Before signing in, the entire workspace view is blurred and locked behind a sign
     5. **Time Off & Leaves**: View all scheduled leaves across team members and years, schedule new time off, or delete existing leave entries.
     6. **Years & System**: Add/switch/remove planning years, change administrator login credentials, open Import/Export backup tools, or reset the workspace to default demo data.
   - **Windows & Offline App**: Open the Windows desktop installer and portable bundle generator.
-  - **Change Login & Password**: Verify your current password and set a custom login and password (persisted in `localStorage`), or reset back to the default `admin:admin`.
+  - **Change Login & Password**: Verify your current password and set a custom login and password (stored in SQLite `auth_users`), or reset back to the default `admin:admin`.
   - **Log Out / Lock Workspace**: Immediately lock and blur the workspace view until signed in again.
 
 ---
@@ -86,9 +86,9 @@ AlloCat lets you inspect and edit your organization's staffing plan from four sy
   - Includes both per-month **Auto-Cap** buttons and a one-click **Auto-Cap All Months** action per person.
 - **Interactive Cell Popover & Batch Assignment**: Adjust allocations via slider or presets (`0%`, `25%`, `50%`, `75%`, `100%`) and apply changes to a single month, the remainder of the year, or all 12 months.
 - **Inline Comments & Staffing Notes**: Add and edit inline comments directly between names and monthly columns for people, projects, assignments, and leaves.
-- **Comprehensive Import, Export & Pre-Built CSV Templates**:
-  - **Tab-Specific & All-Tabs CSV Export / Import**: Export or import `.csv` spreadsheets for `By Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, or all views.
-  - **Downloadable Empty/Example CSV Templates**: Download ready-to-fill `.csv` templates directly from the Import modal.
-  - **Full JSON Backup & Standalone HTML App**: Export the entire workspace state to `.json` or bundle the app into a portable single-file `.html` application.
-- **Local-First Persistence & Privacy**: All workspace data is automatically persisted in browser `localStorage` (`allocat_resource_planner_v3`) with instant updates and zero external database dependencies.
+- **SQLite-Aligned Import, Export & Pre-Built Templates**:
+  - **SQLite Binary & SQL Dump (`.sqlite` / `.sql`)**: Export or import the complete relational SQLite 3 database binary or DDL+INSERT script, or inspect and query live tables (`v_allocation_months`, `v_person_annual_summary`, and all 8 workspace tables) directly inside the built-in SQL Inspector.
+  - **Per-Table & View-Scoped CSV / JSON Export & Import**: Export or import `.csv` and `.json` files mapped 1:1 to normalized SQLite tables (`people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, `planning_years`) or matrix views (`Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, `All Tables`), with downloadable empty and example templates.
+  - **Standalone Offline HTML App**: Bundle the compiled application and your live SQLite database snapshot into a portable single-file `.html` application.
+- **In-Browser SQLite Persistence (`sql.js` WASM)**: Workspace data and credentials are stored in a normalized relational SQLite database persisted to browser IndexedDB (`allocat_sqlite_idb`) with a `localStorage` backup (`allocat_sqlite_b64_v1`) for seamless offline and GitHub Pages usage.
 - **Dark & Light Mode**: Defaults to **Dark Mode**, with a balanced soft-gray **Light Mode** toggle in the header.
