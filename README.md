@@ -2,8 +2,6 @@
 
 **AlloCat** is an interactive annual resource allocation and capacity planning application designed for engineering, product, design, and delivery teams. It provides a unified 12-month matrix workspace backed by an in-browser relational **SQLite WebAssembly (`sql.js`)** database to plan team staffing across clients and deliverable projects, track time off and leaves, identify available bench capacity, analyze utilization & billable ratios, and prevent overtime conflicts in real time.
 
-**Live Application:** [https://ictismylife-dev.github.io/AlloCat/](https://ictismylife-dev.github.io/AlloCat/)
-
 ---
 
 ## Relational SQLite Storage Architecture
