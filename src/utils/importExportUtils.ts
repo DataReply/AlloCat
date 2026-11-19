@@ -23,6 +23,7 @@ import {
 import { AppState } from '../data/seedData';
 import {
   getPersonCapacitySummary,
+  getPersonMonthlySummaryStatuses,
   getProjectStaffingSummary,
   getPersonBenchSummary
 } from './allocationMath';
@@ -691,6 +692,11 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
       person.maxCapacityPercent,
       leaves
     );
+    const summaryStatuses = getPersonMonthlySummaryStatuses(
+      person.id,
+      selectedYear,
+      allocations
+    );
 
     rows.push([
       'person_summary',
@@ -712,7 +718,7 @@ export function generatePeopleViewCSV(state: AppState, peopleSubset?: Person[]):
       '',
       summary.annualAverage,
       ...summary.totals,
-      ...DB_STATUS_COLUMNS.map(() => ''),
+      ...summaryStatuses,
       person.notes || ''
     ]);
 
@@ -1697,6 +1703,54 @@ export function generateViewJSON(state: AppState, scope: ExportScope): string {
   }
 
   if (scope === 'people') {
+    const person_summaries = people.map((person) => {
+      const { firstName, lastName, fullName } = splitPersonName(person);
+      const summary = getPersonCapacitySummary(
+        person.id,
+        selectedYear,
+        allocations,
+        person.maxCapacityPercent,
+        leaves
+      );
+      const summaryStatuses = getPersonMonthlySummaryStatuses(
+        person.id,
+        selectedYear,
+        allocations
+      );
+      return {
+        person_id: person.id,
+        first_name: firstName,
+        last_name: lastName,
+        full_name: fullName,
+        year: selectedYear,
+        annual_avg_pct: summary.annualAverage,
+        jan: summary.totals[0],
+        feb: summary.totals[1],
+        mar: summary.totals[2],
+        apr: summary.totals[3],
+        may: summary.totals[4],
+        jun: summary.totals[5],
+        jul: summary.totals[6],
+        aug: summary.totals[7],
+        sep: summary.totals[8],
+        oct: summary.totals[9],
+        nov: summary.totals[10],
+        dec: summary.totals[11],
+        jan_status: summaryStatuses[0],
+        feb_status: summaryStatuses[1],
+        mar_status: summaryStatuses[2],
+        apr_status: summaryStatuses[3],
+        may_status: summaryStatuses[4],
+        jun_status: summaryStatuses[5],
+        jul_status: summaryStatuses[6],
+        aug_status: summaryStatuses[7],
+        sep_status: summaryStatuses[8],
+        oct_status: summaryStatuses[9],
+        nov_status: summaryStatuses[10],
+        dec_status: summaryStatuses[11]
+      };
+    });
+
     return JSON.stringify(
       {
         ...baseEnvelope,
@@ -1707,7 +1761,8 @@ export function generateViewJSON(state: AppState, scope: ExportScope): string {
         projects: projects.map(toSQLiteProjectRecord),
         allocations: allocations
           .filter((a) => a.year === selectedYear)
-          .map(toSQLiteAllocationRecord)
+          .map(toSQLiteAllocationRecord),
+        person_summaries
       },
       null,
       2
@@ -2024,6 +2079,51 @@ export function generateTemplateCSV(
     const exampleRows: (string | number)[][] = includeExampleRows
       ? [
           [
+            'person_summary',
+            'p-101',
+            selectedYear,
+            'p-101',
+            'Jane',
+            'Doe',
+            'Jane Doe',
+            'Senior Frontend Engineer',
+            'Engineering',
+            'Internal',
+            'jane.doe@company.internal',
+            100,
+            '',
+            '',
+            '',
+            '',
+            '',
+            63,
+            75,
+            75,
+            50,
+            50,
+            75,
+            75,
+            75,
+            75,
+            75,
+            75,
+            25,
+            25,
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'confirmed',
+            'planned',
+            'planned',
+            'mixed',
+            'mixed',
+            'unknown',
+            'unknown',
+            'unknown',
+            'unknown',
+            'React & TypeScript Lead'
+          ],
+          [
             'allocations',
             'a-101',
             selectedYear,
@@ -2041,6 +2141,7 @@ export function generateTemplateCSV(
             'proj-101',
             'NextGen Payments Portal',
             'NGP-01',
+            42,
             50,
             50,
             50,
@@ -2051,11 +2152,8 @@ export function generateTemplateCSV(
             50,
             50,
             50,
-            50,
-            50,
-            50,
-            'confirmed',
-            'confirmed',
+            0,
+            0,
             'confirmed',
             'confirmed',
             'confirmed',
@@ -2064,6 +2162,8 @@ export function generateTemplateCSV(
             'planned',
             'planned',
             'planned',
+            'unknown',
+            'unknown',
             'unknown',
             'unknown',
             'Frontend Architecture Lead'
@@ -2086,6 +2186,11 @@ export function generateTemplateCSV(
             'proj-102',
             'Design System v3',
             'DS-03',
+            21,
+            25,
+            25,
+            0,
+            0,
             25,
             25,
             25,
@@ -2094,19 +2199,14 @@ export function generateTemplateCSV(
             25,
             25,
             25,
-            25,
-            25,
-            25,
-            25,
-            25,
+            'confirmed',
+            'confirmed',
             'planned',
             'planned',
             'planned',
             'planned',
-            'planned',
-            'planned',
-            'unknown',
-            'unknown',
+            'confirmed',
+            'confirmed',
             'unknown',
             'unknown',
             'unknown',
@@ -2711,6 +2811,13 @@ export function generateTemplateJSON(
         industry: 'Financial Services',
         color: '#2563EB',
         status: 'active'
+      },
+      {
+        id: 'c-102',
+        name: 'Internal',
+        industry: 'Platform & Tooling',
+        color: '#059669',
+        status: 'active'
       }
     ],
     projects: [
@@ -2723,6 +2830,16 @@ export function generateTemplateJSON(
         color: '#2563EB',
         billable: true,
         notes: 'Core Portal Delivery'
+      },
+      {
+        id: 'proj-102',
+        clientId: 'c-102',
+        name: 'Design System v3',
+        code: 'DS-03',
+        status: 'active',
+        color: '#059669',
+        billable: false,
+        notes: 'Shared UI Component Library'
       }
     ],
     people: [
@@ -2747,10 +2864,8 @@ export function generateTemplateJSON(
         personId: 'p-101',
         projectId: 'proj-101',
         year: selectedYear,
-        monthlyPercentage: [75, 75, 75, 75, 75, 75, 50, 50, 50, 50, 50, 50],
+        monthlyPercentage: [50, 50, 50, 50, 50, 50, 50, 50, 50, 50, 0, 0],
         monthlyStatus: [
-          'confirmed',
-          'confirmed',
           'confirmed',
           'confirmed',
           'confirmed',
@@ -2760,9 +2875,33 @@ export function generateTemplateJSON(
           'planned',
           'planned',
           'unknown',
+          'unknown',
+          'unknown',
           'unknown'
         ],
         notes: 'Frontend Architecture Lead'
+      },
+      {
+        id: 'a-102',
+        personId: 'p-101',
+        projectId: 'proj-102',
+        year: selectedYear,
+        monthlyPercentage: [25, 25, 0, 0, 25, 25, 25, 25, 25, 25, 25, 25],
+        monthlyStatus: [
+          'confirmed',
+          'confirmed',
+          'planned',
+          'planned',
+          'planned',
+          'planned',
+          'confirmed',
+          'confirmed',
+          'unknown',
+          'unknown',
+          'unknown',
+          'unknown'
+        ],
+        notes: 'Component Library'
       }
     ],
     leaves: [
@@ -3477,21 +3616,26 @@ function importFromCsvContent(
   const rawHeaders = rows[0].map((h) => h.trim());
   const lowerHeaders = rawHeaders.map((h) => h.toLowerCase());
 
-  const colIndex = (candidates: string[]): number => {
+  const colIndex = (candidates: string[], allowSubstringMatch: boolean = true): number => {
     for (const c of candidates) {
       const idx = lowerHeaders.findIndex((h) => h === c.toLowerCase());
       if (idx >= 0) return idx;
     }
-    for (const c of candidates) {
-      const idx = lowerHeaders.findIndex((h) => h.includes(c.toLowerCase()));
-      if (idx >= 0) return idx;
+    if (allowSubstringMatch) {
+      for (const c of candidates) {
+        const idx = lowerHeaders.findIndex((h) => h.includes(c.toLowerCase()));
+        if (idx >= 0) return idx;
+      }
     }
     return -1;
   };
 
   const detectedStandaloneTable = detectStandaloneTableFromHeaders(lowerHeaders, targetScope);
 
-  const idxTableName = colIndex(['table_name', 'row type', 'record type', 'type']);
+  const idxTableName = (() => {
+    const primary = colIndex(['table_name', 'row type', 'record type']);
+    return primary >= 0 ? primary : colIndex(['type'], false);
+  })();
   const idxId = colIndex(['id']);
   const idxYear = colIndex(['year']);
   const idxIsSelected = colIndex(['is_selected']);
@@ -3527,7 +3671,7 @@ function importFromCsvContent(
   const idxAvatarColor = colIndex(['avatar_color']);
   const idxInitials = colIndex(['initials']);
   const idxGenericName = colIndex(['name']);
-  const idxGenericStatus = colIndex(['status']);
+  const idxGenericStatus = colIndex(['status'], false);
   const idxColor = colIndex(['color']);
   const idxNotes = colIndex(['notes']);
 
@@ -3548,7 +3692,10 @@ function importFromCsvContent(
   const idxProjectId = colIndex(['project_id']);
   const idxProject = colIndex(['project_name', 'project', 'project name']);
   const idxProjectCode = colIndex(['code', 'project code']);
-  const idxProjectStatus = colIndex(['project_status', 'project status', 'status']);
+  const idxProjectStatus = (() => {
+    const primary = colIndex(['project_status', 'project status']);
+    return primary >= 0 ? primary : colIndex(['status'], false);
+  })();
   const idxBillable = colIndex(['billable']);
   const idxProjectComment = colIndex(['project scope comment', 'scope note', 'project note']);
   const idxAllocComment = colIndex(['assignment note', 'role note', 'allocation note']);
@@ -3979,7 +4126,15 @@ function importFromCsvContent(
     const avatarColor = getCell(idxAvatarColor);
     const initials = getCell(idxInitials);
     const rowNotes = getCell(idxNotes);
-    const personComment = getCell(idxPersonComment) || (effectiveTable === 'people' ? rowNotes : '');
+    const personComment =
+      getCell(idxPersonComment) ||
+      (effectiveTable === 'people' ||
+      effectiveTable === 'person_summary' ||
+      effectiveTable === 'person summary' ||
+      effectiveTable === 'bench_availability' ||
+      effectiveTable === 'bench availability'
+        ? rowNotes
+        : '');
 
     const clientIdVal =
       getCell(idxClientId) || (effectiveTable === 'clients' ? rowId : '');
@@ -3998,7 +4153,12 @@ function importFromCsvContent(
     const billableStr = getCell(idxBillable);
     const entityColor = getCell(idxColor);
     const projectComment =
-      getCell(idxProjectComment) || (effectiveTable === 'projects' ? rowNotes : '');
+      getCell(idxProjectComment) ||
+      (effectiveTable === 'projects' ||
+      effectiveTable === 'project_summary' ||
+      effectiveTable === 'project summary'
+        ? rowNotes
+        : '');
     const allocComment =
       getCell(idxAllocComment) || (effectiveTable === 'allocations' ? rowNotes : '');
 

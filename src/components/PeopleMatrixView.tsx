@@ -16,7 +16,12 @@ import {
   EMPLOYMENT_BADGE_CONFIG,
   PeopleSortOrder
 } from '../types';
-import { getPersonCapacitySummary, getUtilizationColorClass, formatPersonTableName } from '../utils/allocationMath';
+import {
+  getPersonCapacitySummary,
+  getPersonMonthStatusSummary,
+  getUtilizationColorClass,
+  formatPersonTableName
+} from '../utils/allocationMath';
 import { CommentCell } from './CommentCell';
 
 interface PeopleMatrixViewProps {
@@ -345,19 +350,8 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
                     const activeLeaves = capacitySummary.monthLeaves[monthIdx];
                     const styling = getUtilizationColorClass(totalPct);
 
-                    const activeAllocs = personAllocations.filter(
-                      (a) => (a.monthlyPercentage[monthIdx] || 0) > 0
-                    );
-                    const distinctStatusSet = new Set<AllocationStatus>(
-                      activeAllocs.map(
-                        (a) => (a.monthlyStatus?.[monthIdx] || 'unknown') as AllocationStatus
-                      )
-                    );
-                    const orderedStatuses = ALLOCATION_STATUSES.filter((st) =>
-                      distinctStatusSet.has(st)
-                    );
-                    const uniformStatus: AllocationStatus | null =
-                      orderedStatuses.length === 1 ? orderedStatuses[0] : null;
+                    const { activeAllocs, orderedStatuses, uniformStatus } =
+                      getPersonMonthStatusSummary(personAllocations, monthIdx);
                     const summaryStatusCfg = uniformStatus
                       ? ALLOCATION_STATUS_CONFIG[uniformStatus]
                       : null;

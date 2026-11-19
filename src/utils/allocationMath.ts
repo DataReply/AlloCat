@@ -1,4 +1,76 @@
-import { Allocation, Person, Project, LeaveEntry } from '../types';
+import {
+  Allocation,
+  AllocationStatus,
+  ALLOCATION_STATUSES,
+  Person,
+  Project,
+  LeaveEntry
+} from '../types';
+
+export type PersonMonthSummaryStatus = AllocationStatus | 'mixed' | '';
+
+export interface PersonMonthStatusSummary {
+  activeAllocs: Allocation[];
+  orderedStatuses: AllocationStatus[];
+  uniformStatus: AllocationStatus | null;
+  summaryStatus: PersonMonthSummaryStatus;
+}
+
+/**
+ * Computes aggregate allocation status for a person in a single month across active allocations (pct > 0).
+ * Returns '' when 0% allocated, the single AllocationStatus when uniform, or 'mixed' when multiple projects differ.
+ */
+export function getPersonMonthStatusSummary(
+  personAllocations: Allocation[],
+  monthIdx: number
+): PersonMonthStatusSummary {
+  const activeAllocs = personAllocations.filter(
+    (a) => (a.monthlyPercentage?.[monthIdx] || 0) > 0
+  );
+  if (activeAllocs.length === 0) {
+    return {
+      activeAllocs,
+      orderedStatuses: [],
+      uniformStatus: null,
+      summaryStatus: ''
+    };
+  }
+
+  const distinctStatusSet = new Set<AllocationStatus>(
+    activeAllocs.map(
+      (a) => (a.monthlyStatus?.[monthIdx] || 'unknown') as AllocationStatus
+    )
+  );
+  const orderedStatuses = ALLOCATION_STATUSES.filter((st) =>
+    distinctStatusSet.has(st)
+  );
+  const uniformStatus = orderedStatuses.length === 1 ? orderedStatuses[0] : null;
+  const summaryStatus: PersonMonthSummaryStatus = uniformStatus ?? 'mixed';
+
+  return {
+    activeAllocs,
+    orderedStatuses,
+    uniformStatus,
+    summaryStatus
+  };
+}
+
+/**
+ * Computes the 12-month array of person summary statuses for a given person & year.
+ */
+export function getPersonMonthlySummaryStatuses(
+  personId: string,
+  year: number,
+  allocations: Allocation[]
+): PersonMonthSummaryStatus[] {
+  const personAllocations = allocations.filter(
+    (a) => a.personId === personId && a.year === year
+  );
+  return Array.from(
+    { length: 12 },
+    (_, monthIdx) => getPersonMonthStatusSummary(personAllocations, monthIdx).summaryStatus
+  );
+}
 
 export interface MonthlyCapacitySummary {
   totals: number[]; // 12 elements (allocated %)

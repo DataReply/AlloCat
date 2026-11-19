@@ -28,6 +28,7 @@ AlloCat lets you inspect and edit your organization's staffing plan from four sy
 
 2. **By People (`PeopleMatrixView`)**
    - Displays every team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`).
+   - Displays color-coded monthly allocation statuses on person summary rows (**Unknown**, **Planned**, **Confirmed**, or **Mixed** when multiple projects differ in the same month) with one-click status cycling directly on the summary cell.
    - Expand any person's row (or click **Expand All Rows**) to view and edit individual project allocations and per-month statuses (**Unknown**, **Planned**, **Confirmed**) month by month.
    - Click any monthly project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown, a multi-segment capacity bar, active leave reductions, month status selector, and quick project switching.
 
@@ -62,7 +63,7 @@ Open **Import / Export** from the **Admin Panel** (accessible via the **AlloCat 
   - Built-in **SQLite Schema & Query Inspector** to browse the full `CREATE TABLE` / `CREATE VIEW` DDL and run read-only `SELECT`, `WITH`, `PRAGMA`, or `EXPLAIN` queries directly against live tables and views.
 - **Per-Table & View-Scoped CSV / JSON Export & Import**:
   - **SQLite Tables**: Export, import, or download empty/example `.csv` and `.json` templates mapped 1:1 to normalized columns—including `jan_status`–`dec_status` (`unknown`, `planned`, `confirmed`) on `allocations`—with preserved primary/foreign keys for `people`, `clients`, `projects`, `allocations`, `leaves`, `departments`, `leave_types`, and `planning_years`.
-  - **Views & Full Workspace**: Export or import synchronized relational snapshots for `All Tables`, `Clients & Projects`, `By People`, `Availability & Leaves`, `Bench`, or `Admin Directories`, supporting both **Merge / Upsert** and **Full Replace** import modes.
+  - **Views & Full Workspace**: Export or import synchronized relational snapshots for `All Tables`, `Clients & Projects`, `By People` (including `person_summary` monthly statuses: `unknown`, `planned`, `confirmed`, `mixed`), `Availability & Leaves`, `Bench`, or `Admin Directories`, supporting both **Merge / Upsert** and **Full Replace** import modes.
 - **Standalone Offline HTML App**: Bundle the compiled app and a live base64-encoded SQLite database snapshot (`window.__ALLOCAT_EMBEDDED_SQLITE__`) into a single self-contained `.html` file.
 
 ---
