@@ -92,7 +92,7 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
       <div className="px-4 py-1.5 bg-slate-100 dark:bg-slate-900/95 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-[11px] shrink-0">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold text-slate-600 dark:text-slate-300">
-            Project Allocation Month Status:
+            Allocation Month Status:
           </span>
           {ALLOCATION_STATUSES.map((st) => {
             const cfg = ALLOCATION_STATUS_CONFIG[st];
@@ -106,9 +106,19 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
               </span>
             );
           })}
+          <span
+            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-medium bg-slate-200/75 dark:bg-[#333a47] text-slate-800 dark:text-slate-100 border-slate-300/70 dark:border-slate-600/80"
+            title="Multiple projects in the same month have different statuses"
+          >
+            <span className="inline-flex items-center gap-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 dark:bg-yellow-400" />
+              <span className="w-1.5 h-1.5 rounded-full bg-green-600 dark:bg-emerald-400" />
+            </span>
+            <span>Mixed</span>
+          </span>
         </div>
         <span className="text-[10px] text-slate-500 dark:text-slate-400">
-          Expand a person to see per-month project statuses · Click status pill to cycle
+          Click any cell to edit % & status · Click status pill to cycle · Expand a person for per-project statuses
         </span>
       </div>
 
@@ -335,27 +345,139 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
                     const activeLeaves = capacitySummary.monthLeaves[monthIdx];
                     const styling = getUtilizationColorClass(totalPct);
 
+                    const activeAllocs = personAllocations.filter(
+                      (a) => (a.monthlyPercentage[monthIdx] || 0) > 0
+                    );
+                    const distinctStatusSet = new Set<AllocationStatus>(
+                      activeAllocs.map(
+                        (a) => (a.monthlyStatus?.[monthIdx] || 'unknown') as AllocationStatus
+                      )
+                    );
+                    const orderedStatuses = ALLOCATION_STATUSES.filter((st) =>
+                      distinctStatusSet.has(st)
+                    );
+                    const uniformStatus: AllocationStatus | null =
+                      orderedStatuses.length === 1 ? orderedStatuses[0] : null;
+                    const summaryStatusCfg = uniformStatus
+                      ? ALLOCATION_STATUS_CONFIG[uniformStatus]
+                      : null;
+                    const nextMonthStatus: AllocationStatus = uniformStatus
+                      ? getNextAllocationStatus(uniformStatus)
+                      : 'confirmed';
+
+                    const statusBreakdownText = activeAllocs
+                      .map((a) => {
+                        const proj = getProject(a.projectId);
+                        const st = (a.monthlyStatus?.[monthIdx] || 'unknown') as AllocationStatus;
+                        return `${proj?.name || 'Project'}: ${a.monthlyPercentage[monthIdx]}% (${ALLOCATION_STATUS_CONFIG[st].label})`;
+                      })
+                      .join(', ');
+
+                    const cellBgClass =
+                      activeAllocs.length > 0
+                        ? summaryStatusCfg
+                          ? summaryStatusCfg.cellBg
+                          : 'bg-slate-200/75 dark:bg-[#333a47]'
+                        : isOver
+                        ? 'bg-rose-50 dark:bg-rose-950/40'
+                        : styling.bg;
+
+                    const cellTextClass =
+                      activeAllocs.length > 0
+                        ? summaryStatusCfg
+                          ? `${summaryStatusCfg.cellText} font-semibold`
+                          : 'text-slate-900 dark:text-slate-100 font-semibold'
+                        : isOver
+                        ? 'text-rose-700 dark:text-rose-400 font-bold'
+                        : styling.text;
+
                     return (
                       <td
                         key={monthIdx}
                         onClick={() => onOpenPersonMonth?.(person.id, monthIdx)}
-                        className={`p-1 text-center font-mono tabular-nums border-r border-slate-200/60 dark:border-slate-800/60 last:border-r-0 cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/60 hover:bg-blue-50/40 dark:hover:bg-blue-950/40 ${
-                          isOver ? 'bg-rose-50 dark:bg-rose-950/40' : styling.bg
+                        className={`p-1 text-center font-mono tabular-nums border-r border-slate-200/60 dark:border-slate-800/60 last:border-r-0 cursor-pointer transition-all hover:ring-2 hover:ring-blue-500/60 ${cellBgClass} ${
+                          isOver ? 'ring-1 ring-inset ring-rose-500/80' : ''
                         }`}
-                        title={`Click to view and edit ${person.name}'s ${MONTH_NAMES[monthIdx]} workload (${totalPct}%) and project allocations`}
+                        title={
+                          activeAllocs.length > 0
+                            ? `Click to edit ${person.name}'s ${MONTH_NAMES[monthIdx]} workload (${totalPct}% — ${statusBreakdownText})`
+                            : `Click to view and edit ${person.name}'s ${MONTH_NAMES[monthIdx]} workload (${totalPct}%) and project allocations`
+                        }
                       >
-                        <div className="flex flex-col items-center justify-center py-1">
-                          <span
-                            className={`text-xs ${
-                              isOver ? 'text-rose-700 dark:text-rose-400 font-bold' : styling.text
-                            }`}
-                          >
+                        <div className="flex flex-col items-center justify-center py-0.5 gap-0.5">
+                          <span className={`text-xs ${cellTextClass}`}>
                             {totalPct > 0 ? `${totalPct}%` : '—'}
                           </span>
 
+                          {activeAllocs.length > 0 && (
+                            onUpdateAllocationStatus ? (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  activeAllocs.forEach((a) => {
+                                    onUpdateAllocationStatus(a.id, monthIdx, nextMonthStatus);
+                                  });
+                                }}
+                                title={
+                                  uniformStatus
+                                    ? `Status: ${ALLOCATION_STATUS_CONFIG[uniformStatus].label} — Click to change to ${ALLOCATION_STATUS_CONFIG[nextMonthStatus].label}`
+                                    : `Mixed statuses (${statusBreakdownText}) — Click to mark all as Confirmed`
+                                }
+                                className="inline-flex items-center gap-1 px-1 py-0.2 rounded text-[8px] font-sans font-medium bg-white/80 dark:bg-black/35 text-slate-800 dark:text-white/95 hover:bg-white dark:hover:bg-black/55 border border-black/10 dark:border-white/20 cursor-pointer transition-colors"
+                              >
+                                {summaryStatusCfg ? (
+                                  <>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${summaryStatusCfg.dotClass}`} />
+                                    <span>{summaryStatusCfg.shortLabel}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="inline-flex items-center gap-0.5">
+                                      {orderedStatuses.map((st) => (
+                                        <span
+                                          key={st}
+                                          className={`w-1.5 h-1.5 rounded-full ${ALLOCATION_STATUS_CONFIG[st].dotClass}`}
+                                        />
+                                      ))}
+                                    </span>
+                                    <span>Mix</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <span
+                                className={`inline-flex items-center gap-1 text-[8px] font-sans ${
+                                  summaryStatusCfg
+                                    ? summaryStatusCfg.cellText
+                                    : 'text-slate-700 dark:text-slate-200'
+                                }`}
+                              >
+                                {summaryStatusCfg ? (
+                                  <>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${summaryStatusCfg.dotClass}`} />
+                                    <span>{summaryStatusCfg.shortLabel}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="inline-flex items-center gap-0.5">
+                                      {orderedStatuses.map((st) => (
+                                        <span
+                                          key={st}
+                                          className={`w-1.5 h-1.5 rounded-full ${ALLOCATION_STATUS_CONFIG[st].dotClass}`}
+                                        />
+                                      ))}
+                                    </span>
+                                    <span>Mix</span>
+                                  </>
+                                )}
+                              </span>
+                            )
+                          )}
+
                           {activeLeaves.length > 0 && (
                             <span
-                              className="mt-0.5 px-1 py-0.2 text-[8px] font-semibold rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 truncate max-w-[64px]"
+                              className="px-1 py-0.2 text-[8px] font-semibold rounded bg-purple-100/90 text-purple-800 dark:bg-purple-950/90 dark:text-purple-200 truncate max-w-[64px]"
                               title={`${activeLeaves.map((l) => l.title).join(', ')} (-${capacitySummary.leaveReductions[monthIdx]}% cap)`}
                             >
                               {activeLeaves[0].type.slice(0, 4)}
@@ -364,7 +486,7 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
 
                           {isOver && (
                             <span
-                              className="mt-0.5 px-1 py-0.2 text-[9px] font-bold rounded bg-rose-600 text-white tracking-tight"
+                              className="px-1 py-0.2 text-[9px] font-bold rounded bg-rose-600 text-white tracking-tight"
                               title={`Allocated ${totalPct}% against ${effCap}% available capacity (+${excess}% over)`}
                             >
                               +{excess}%
