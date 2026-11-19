@@ -16,7 +16,8 @@ import {
   KeyRound,
   Download,
   RotateCcw,
-  AlertTriangle
+  AlertTriangle,
+  Eraser
 } from 'lucide-react';
 import {
   Client,
@@ -45,6 +46,16 @@ export type AdminTab =
   | 'projects'
   | 'leaves'
   | 'workspace';
+
+export type ClearableDataArea =
+  | 'allocations'
+  | 'leaves'
+  | 'projects'
+  | 'clients'
+  | 'people'
+  | 'departments'
+  | 'leaveTypes'
+  | 'years';
 
 interface AdminPanelModalProps {
   isOpen: boolean;
@@ -88,6 +99,7 @@ interface AdminPanelModalProps {
   onOpenChangeCredentials: () => void;
   onOpenExportImport: (scope?: ExportScope) => void;
   onResetWorkspace: () => void;
+  onClearWorkspaceData?: (areas: ClearableDataArea[]) => void;
 }
 
 const CLIENT_COLORS = [
@@ -137,7 +149,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onSelectYear,
   onOpenChangeCredentials,
   onOpenExportImport,
-  onResetWorkspace
+  onResetWorkspace,
+  onClearWorkspaceData
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -146,6 +159,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (isOpen) {
       setActiveTab(initialTab);
       setSearchQuery('');
+      setConfirmClear(false);
+      setClearFeedback(null);
     }
   }, [isOpen, initialTab]);
 
@@ -182,6 +197,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [customYear, setCustomYear] = useState<string>(String(maxYear + 1));
   const [yearError, setYearError] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+
+  // Selective Clear Data state
+  const [selectedClearAreas, setSelectedClearAreas] = useState<Set<ClearableDataArea>>(
+    () => new Set<ClearableDataArea>()
+  );
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearFeedback, setClearFeedback] = useState<string | null>(null);
 
   // Filter lists
   const filteredPeople = useMemo(() => {
@@ -1602,6 +1624,320 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {/* Full-width Clear Workspace Data Card */}
+                  {onClearWorkspaceData && (() => {
+                    const effectiveClearSet = new Set<ClearableDataArea>(selectedClearAreas);
+                    if (effectiveClearSet.has('clients')) {
+                      effectiveClearSet.add('projects');
+                      effectiveClearSet.add('allocations');
+                    }
+                    if (effectiveClearSet.has('projects')) {
+                      effectiveClearSet.add('allocations');
+                    }
+                    if (effectiveClearSet.has('people')) {
+                      effectiveClearSet.add('allocations');
+                      effectiveClearSet.add('leaves');
+                    }
+
+                    const customLeaveTypesCount = Object.keys(leaveTypes).length;
+                    const extraYearsCount = Math.max(0, availableYears.length - 1);
+
+                    const areaOptions: {
+                      id: ClearableDataArea;
+                      label: string;
+                      tableName: string;
+                      detail: string;
+                      countLabel: string;
+                      lockedReason?: string;
+                    }[] = [
+                      {
+                        id: 'allocations',
+                        label: 'Project Allocations',
+                        tableName: 'allocations',
+                        detail: 'Monthly % bookings and cell statuses (Unknown / Planned / Confirmed)',
+                        countLabel: `${allocations.length} row${allocations.length === 1 ? '' : 's'}`,
+                        lockedReason:
+                          selectedClearAreas.has('clients')
+                            ? 'Included via Clients'
+                            : selectedClearAreas.has('projects')
+                            ? 'Included via Projects'
+                            : selectedClearAreas.has('people')
+                            ? 'Included via Team Members'
+                            : undefined
+                      },
+                      {
+                        id: 'leaves',
+                        label: 'Time Off & Leaves',
+                        tableName: 'leaves',
+                        detail: 'Scheduled employee vacations, sick leave, and capacity reductions',
+                        countLabel: `${leaves.length} entr${leaves.length === 1 ? 'y' : 'ies'}`,
+                        lockedReason: selectedClearAreas.has('people')
+                          ? 'Included via Team Members'
+                          : undefined
+                      },
+                      {
+                        id: 'projects',
+                        label: 'Deliverable Projects',
+                        tableName: 'projects',
+                        detail: 'Project catalog & scope notes (automatically clears Allocations)',
+                        countLabel: `${projects.length} project${projects.length === 1 ? '' : 's'}`,
+                        lockedReason: selectedClearAreas.has('clients')
+                          ? 'Included via Clients'
+                          : undefined
+                      },
+                      {
+                        id: 'clients',
+                        label: 'Client Accounts',
+                        tableName: 'clients',
+                        detail: 'Client organizations (automatically clears Projects & Allocations)',
+                        countLabel: `${clients.length} client${clients.length === 1 ? '' : 's'}`
+                      },
+                      {
+                        id: 'people',
+                        label: 'Team Members',
+                        tableName: 'people',
+                        detail: 'Staff roster & profiles (automatically clears Allocations & Leaves)',
+                        countLabel: `${people.length} ${people.length === 1 ? 'person' : 'people'}`
+                      },
+                      {
+                        id: 'departments',
+                        label: 'Departments',
+                        tableName: 'departments',
+                        detail: 'Clears unused departments (retains General if empty, or active staff depts)',
+                        countLabel: `${departments.length} dept${departments.length === 1 ? '' : 's'}`
+                      },
+                      {
+                        id: 'leaveTypes',
+                        label: 'Leave Types',
+                        tableName: 'leave_types',
+                        detail: 'Resets custom leave categories back to built-in default types',
+                        countLabel: `${customLeaveTypesCount} type${customLeaveTypesCount === 1 ? '' : 's'}`
+                      },
+                      {
+                        id: 'years',
+                        label: 'Extra Planning Years',
+                        tableName: 'planning_years',
+                        detail: `Removes non-active years and keeps only ${selectedYear}`,
+                        countLabel: `${extraYearsCount} extra yr${extraYearsCount === 1 ? '' : 's'}`
+                      }
+                    ];
+
+                    const allAreaIds = areaOptions.map((o) => o.id);
+                    const allSelected = allAreaIds.every((id) => selectedClearAreas.has(id));
+
+                    const toggleArea = (id: ClearableDataArea) => {
+                      setConfirmClear(false);
+                      setClearFeedback(null);
+                      setSelectedClearAreas((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id);
+                        else next.add(id);
+                        return next;
+                      });
+                    };
+
+                    const selectAllAreas = () => {
+                      setConfirmClear(false);
+                      setClearFeedback(null);
+                      setSelectedClearAreas(new Set(allAreaIds));
+                    };
+
+                    const selectOperationalOnly = () => {
+                      setConfirmClear(false);
+                      setClearFeedback(null);
+                      setSelectedClearAreas(new Set<ClearableDataArea>(['allocations', 'leaves']));
+                    };
+
+                    const clearAreaSelection = () => {
+                      setConfirmClear(false);
+                      setClearFeedback(null);
+                      setSelectedClearAreas(new Set());
+                    };
+
+                    const executeClear = () => {
+                      if (effectiveClearSet.size === 0) return;
+                      const clearedLabels = areaOptions
+                        .filter((opt) => effectiveClearSet.has(opt.id))
+                        .map((opt) => opt.label);
+                      onClearWorkspaceData(Array.from(effectiveClearSet));
+                      setSelectedClearAreas(new Set());
+                      setConfirmClear(false);
+                      setClearFeedback(`Cleared: ${clearedLabels.join(', ')}.`);
+                    };
+
+                    return (
+                      <div className="md:col-span-2 p-5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/15 space-y-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex items-start gap-2.5">
+                            <Eraser className="w-4 h-4 text-rose-600 dark:text-rose-400 mt-0.5 shrink-0" />
+                            <div>
+                              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                                Clear Workspace Data by Table / Area
+                              </h3>
+                              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                                Select specific SQLite tables/areas to wipe—or select all to start from a completely blank workspace. Admin login credentials are always preserved.
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={selectOperationalOnly}
+                              className="px-2.5 py-1 text-[11px] font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                              title="Select only Allocations & Leaves while keeping team, clients, and projects"
+                            >
+                              Bookings & Leaves Only
+                            </button>
+                            <button
+                              type="button"
+                              onClick={allSelected ? clearAreaSelection : selectAllAreas}
+                              className="px-2.5 py-1 text-[11px] font-semibold rounded-lg border border-rose-300 dark:border-rose-800 bg-white dark:bg-slate-900 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 transition-colors cursor-pointer"
+                            >
+                              {allSelected ? 'Deselect All' : 'Select All Data'}
+                            </button>
+                            {selectedClearAreas.size > 0 && !allSelected && (
+                              <button
+                                type="button"
+                                onClick={clearAreaSelection}
+                                className="px-2 py-1 text-[11px] text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer"
+                              >
+                                Clear Selection
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                          {areaOptions.map((opt) => {
+                            const isExplicitlyChecked = selectedClearAreas.has(opt.id);
+                            const isCascaded = Boolean(opt.lockedReason);
+                            const isChecked = isExplicitlyChecked || isCascaded;
+
+                            return (
+                              <label
+                                key={opt.id}
+                                className={`flex items-start gap-2.5 p-3 rounded-xl border transition-all select-none ${
+                                  isCascaded
+                                    ? 'bg-rose-100/70 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800/80 cursor-not-allowed opacity-90'
+                                    : isChecked
+                                    ? 'bg-rose-50 dark:bg-rose-950/35 border-rose-400 dark:border-rose-700 cursor-pointer shadow-2xs'
+                                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={isCascaded}
+                                  onChange={() => toggleArea(opt.id)}
+                                  className="mt-0.5 rounded border-slate-300 text-rose-600 focus:ring-rose-500 cursor-pointer disabled:cursor-not-allowed"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center justify-between gap-1.5">
+                                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                      {opt.label}
+                                    </span>
+                                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                                      {opt.countLabel}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 mt-0.5">
+                                    {opt.tableName}
+                                  </div>
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 leading-snug">
+                                    {opt.lockedReason ? (
+                                      <span className="font-semibold text-rose-700 dark:text-rose-300">
+                                        {opt.lockedReason}
+                                      </span>
+                                    ) : (
+                                      opt.detail
+                                    )}
+                                  </p>
+                                </div>
+                              </label>
+                            );
+                          })}
+                        </div>
+
+                        {clearFeedback && (
+                          <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300">
+                            <div className="flex items-center gap-2">
+                              <Check className="w-4 h-4 shrink-0" />
+                              <span>{clearFeedback}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setClearFeedback(null)}
+                              className="text-emerald-600 dark:text-emerald-400 hover:underline text-[11px] cursor-pointer"
+                            >
+                              Dismiss
+                            </button>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {effectiveClearSet.size === 0
+                              ? 'Select one or more tables/areas above, or click "Clear All Data" to empty the entire workspace.'
+                              : `${effectiveClearSet.size} table${effectiveClearSet.size === 1 ? '' : 's'}/area${effectiveClearSet.size === 1 ? '' : 's'} will be cleared`}
+                          </span>
+
+                          {!confirmClear ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={effectiveClearSet.size === 0}
+                                onClick={() => {
+                                  setConfirmClear(true);
+                                  setClearFeedback(null);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                <Eraser className="w-3.5 h-3.5" />
+                                <span>
+                                  Clear Selected ({effectiveClearSet.size})
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedClearAreas(new Set(allAreaIds));
+                                  setConfirmClear(true);
+                                  setClearFeedback(null);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors bg-rose-600 hover:bg-rose-700 text-white shadow-xs cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Clear All Data</span>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-2 bg-rose-100/80 dark:bg-rose-950/70 px-3 py-2 rounded-lg border border-rose-300 dark:border-rose-700">
+                              <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                              <span className="text-xs font-semibold text-rose-800 dark:text-rose-200">
+                                Permanently clear {effectiveClearSet.size} selected area{effectiveClearSet.size === 1 ? '' : 's'}?
+                              </span>
+                              <button
+                                type="button"
+                                onClick={executeClear}
+                                className="px-3 py-1 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-md cursor-pointer"
+                              >
+                                Yes, Clear Data
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmClear(false)}
+                                className="px-2.5 py-1 text-xs text-slate-600 dark:text-slate-300 hover:bg-white/60 dark:hover:bg-slate-800 rounded-md cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

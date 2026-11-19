@@ -65,7 +65,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
           : ''
       );
       setRole(personToEdit.role || '');
-      setDepartment(personToEdit.department || departments[0] || 'Engineering');
+      setDepartment(personToEdit.department || departments[0] || 'General');
       setEmploymentType(personToEdit.employmentType || 'Internal');
       setEmail(personToEdit.email || '');
       setMaxCapacityPercent(personToEdit.maxCapacityPercent ?? 100);
@@ -75,7 +75,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       setFirstName('');
       setLastName('');
       setRole('');
-      setDepartment(departments[0] || 'Engineering');
+      setDepartment(departments[0] || 'General');
       setEmploymentType('Internal');
       setEmail('');
       setMaxCapacityPercent(100);
@@ -227,7 +227,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 onChange={(e) => setDepartment(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
               >
-                {departments.map((d) => (
+                {(departments.length > 0 ? departments : ['General']).map((d) => (
                   <option key={d} value={d}>
                     {d}
                   </option>
