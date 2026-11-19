@@ -92,7 +92,7 @@ const VIEW_SCOPE_TABS: Array<{
     label: 'Clients & Projects Matrix',
     shortLabel: 'Clients & Projects',
     description:
-      'Client portfolios, project_summary totals, and staff allocation rows keyed by client_id, project_id, and person_id.',
+      'Client portfolios, project_summary totals, and staff allocation rows with monthly statuses (unknown, planned, confirmed) keyed by client_id, project_id, and person_id.',
     csvColumnsHint:
       'table_name, id, year, client_id, client_name, industry, project_id, project_name, code, project_status, billable (1/0), person_id, first_name, last_name, full_name, role, department, employment_type, annual_avg_pct, jan..dec, jan_status..dec_status, notes',
     icon: Briefcase
@@ -102,7 +102,7 @@ const VIEW_SCOPE_TABS: Array<{
     label: 'People & Assignments Matrix',
     shortLabel: 'By People',
     description:
-      'Person capacity summaries alongside monthly allocation rows keyed by person_id and project_id.',
+      'Person monthly capacity & status summaries (unknown, planned, confirmed, mixed) alongside project allocation rows keyed by person_id and project_id.',
     csvColumnsHint:
       'table_name, id, year, person_id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, client_id, client_name, project_id, project_name, code, annual_avg_pct, jan..dec, jan_status..dec_status, notes',
     icon: Users
@@ -169,7 +169,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
   const [showSchemaInspector, setShowSchemaInspector] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<'ddl' | 'query'>('ddl');
   const [sqlQueryText, setSqlQueryText] = useState<string>(
-    `SELECT person_name, department, client_name, project_code, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
+    `SELECT person_name, project_code, jan, jan_status, feb, feb_status, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
   );
   const [sqlQueryResult, setSqlQueryResult] = useState<{
     columns: string[];
@@ -799,7 +799,7 @@ export const ExportImportModal: React.FC<ExportImportModalProps> = ({
                         type="button"
                         onClick={() =>
                           setSqlQueryText(
-                            `SELECT person_name, department, client_name, project_code, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
+                            `SELECT person_name, project_code, jan, jan_status, feb, feb_status, annual_avg_pct\nFROM v_allocation_months\nWHERE year = ${appState.selectedYear}\nORDER BY annual_avg_pct DESC\nLIMIT 12;`
                           )
                         }
                         className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:border-indigo-500 border border-slate-200 dark:border-slate-700 cursor-pointer"
