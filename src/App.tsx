@@ -12,7 +12,9 @@ import {
   DEFAULT_LEAVE_TYPE_CONFIG,
   Department,
   EmploymentType,
-  normalizeAllocationStatuses
+  normalizeAllocationStatuses,
+  getLeaveTypeMeta,
+  syncLeaveTypeConfigRegistry
 } from './types';
 import {
   AppState,
@@ -38,7 +40,11 @@ import { ManageYearsModal } from './components/ManageYearsModal';
 import { ManageDepartmentsModal } from './components/ManageDepartmentsModal';
 import { ConfirmDeletePersonModal } from './components/ConfirmDeletePersonModal';
 import { ExportImportModal } from './components/ExportImportModal';
-import { AdminPanelModal, AdminTab } from './components/AdminPanelModal';
+import {
+  AdminPanelModal,
+  AdminTab,
+  ClearableDataArea
+} from './components/AdminPanelModal';
 import { ReportingModal, ReportTab } from './components/ReportingModal';
 import { StandaloneAppModal } from './components/StandaloneAppModal';
 import { useOnlineStatus } from './utils/usePWAInstall';
@@ -889,6 +895,96 @@ export function App() {
     }
   };
 
+  // Selective or full workspace data clearing (preserves admin login credentials)
+  const handleClearWorkspaceData = (areas: ClearableDataArea[]) => {
+    const effective = new Set<ClearableDataArea>(areas);
+    if (effective.has('clients')) {
+      effective.add('projects');
+      effective.add('allocations');
+    }
+    if (effective.has('projects')) {
+      effective.add('allocations');
+    }
+    if (effective.has('people')) {
+      effective.add('allocations');
+      effective.add('leaves');
+    }
+
+    setAppState((prev) => {
+      const nextPeople = effective.has('people') ? [] : prev.people;
+      const nextClients = effective.has('clients') ? [] : prev.clients;
+      const nextProjects = effective.has('projects') ? [] : prev.projects;
+
+      const nextAvailableYears = effective.has('years')
+        ? [prev.selectedYear]
+        : prev.availableYears;
+      const allowedYearSet = new Set(nextAvailableYears);
+
+      const nextAllocations = effective.has('allocations')
+        ? []
+        : prev.allocations.filter((a) => allowedYearSet.has(a.year));
+
+      const nextLeaves = effective.has('leaves')
+        ? []
+        : prev.leaves.filter((l) => allowedYearSet.has(l.year));
+
+      const remainingPersonDepts = Array.from(
+        new Set(nextPeople.map((p) => p.department).filter(Boolean))
+      );
+      const nextDepartments = effective.has('departments')
+        ? remainingPersonDepts.length > 0
+          ? remainingPersonDepts
+          : ['General']
+        : prev.departments;
+
+      let nextLeaveTypes = prev.leaveTypes || DEFAULT_LEAVE_TYPE_CONFIG;
+      if (effective.has('leaveTypes')) {
+        const preserved: Record<LeaveType, LeaveTypeMeta> = {
+          ...DEFAULT_LEAVE_TYPE_CONFIG
+        };
+        for (const l of nextLeaves) {
+          if (!preserved[l.type]) {
+            preserved[l.type] = getLeaveTypeMeta(l.type, prev.leaveTypes);
+          }
+        }
+        nextLeaveTypes = preserved;
+        syncLeaveTypeConfigRegistry(nextLeaveTypes);
+      }
+
+      return {
+        ...prev,
+        people: nextPeople,
+        clients: nextClients,
+        projects: nextProjects,
+        allocations: nextAllocations,
+        leaves: nextLeaves,
+        availableYears: nextAvailableYears,
+        departments: nextDepartments,
+        leaveTypes: nextLeaveTypes
+      };
+    });
+
+    if (effective.has('clients')) {
+      setFilters((prev) => ({ ...prev, clientFilter: 'all' }));
+    }
+    if (effective.has('departments')) {
+      setFilters((prev) => ({ ...prev, department: 'all' }));
+    }
+    if (effective.has('people')) {
+      setExpandedPersonIds(new Set());
+    }
+    if (effective.has('projects')) {
+      setExpandedProjectIds(new Set());
+    }
+    if (
+      effective.has('allocations') ||
+      effective.has('people') ||
+      effective.has('projects')
+    ) {
+      setActiveCellEditor(null);
+    }
+  };
+
   // Active cell editor details
   const activeEditorData = useMemo(() => {
     if (!activeCellEditor) return null;
@@ -1261,6 +1357,7 @@ export function App() {
           setAppState(fresh);
           resetSQLiteWorkspace();
         }}
+        onClearWorkspaceData={handleClearWorkspaceData}
       />
 
       <ReportingModal
