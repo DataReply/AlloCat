@@ -48,20 +48,16 @@
           var check = await fetch(basePrefix + 'docs/assets/app.js?v=' + cacheBust, { cache: 'no-store' });
           var contentType = check.headers.get('content-type') || '';
           if (check.ok && !contentType.includes('text/html')) {
-            var jsCode = await check.text();
-            if (jsCode.includes('Reporting & Capacity Analytics')) {
-              var link = document.createElement('link');
-              link.rel = 'stylesheet';
-              link.href = basePrefix + 'docs/assets/app.css?v=' + cacheBust;
-              document.head.appendChild(link);
+            var link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = basePrefix + 'docs/assets/app.css?v=' + cacheBust;
+            document.head.appendChild(link);
 
-              var blob = new Blob([jsCode], { type: 'text/javascript' });
-              var script = document.createElement('script');
-              script.type = 'module';
-              script.src = URL.createObjectURL(blob);
-              document.body.appendChild(script);
-              return;
-            }
+            var script = document.createElement('script');
+            script.type = 'module';
+            script.src = basePrefix + 'docs/assets/app.js?v=' + cacheBust;
+            document.body.appendChild(script);
+            return;
           }
         } catch (_) {}
 

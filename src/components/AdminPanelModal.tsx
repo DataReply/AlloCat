@@ -17,7 +17,14 @@ import {
   Download,
   RotateCcw,
   AlertTriangle,
-  Eraser
+  Eraser,
+  UserPlus,
+  Copy,
+  RefreshCw,
+  Mail,
+  CheckCircle2,
+  Cloud,
+  Upload
 } from 'lucide-react';
 import {
   Client,
@@ -38,6 +45,11 @@ import {
 } from '../types';
 import { formatPersonTableName } from '../utils/allocationMath';
 import { ExportScope } from '../utils/importExportUtils';
+import {
+  WorkspaceMember,
+  WorkspaceRole,
+  AdminCollabState
+} from '../utils/firestoreSync';
 
 export type AdminTab =
   | 'people'
@@ -45,6 +57,7 @@ export type AdminTab =
   | 'clients'
   | 'projects'
   | 'leaves'
+  | 'team'
   | 'workspace';
 
 export type ClearableDataArea =
@@ -96,10 +109,22 @@ interface AdminPanelModalProps {
   onAddYear: (year: number) => void;
   onRemoveYear: (year: number) => void;
   onSelectYear: (year: number) => void;
-  onOpenChangeCredentials: () => void;
   onOpenExportImport: (scope?: ExportScope) => void;
   onResetWorkspace: () => void;
   onClearWorkspaceData?: (areas: ClearableDataArea[]) => void;
+  // Team & Collaboration props
+  currentUserUid?: string;
+  userRole?: WorkspaceRole;
+  members?: WorkspaceMember[];
+  adminCollabState?: AdminCollabState | null;
+  onRotateJoinCode?: () => Promise<void>;
+  onCreateEmailInvite?: (email: string, role: WorkspaceRole) => Promise<void>;
+  onDeleteEmailInvite?: (inviteId: string) => Promise<void>;
+  onApproveJoinRequest?: (request: AdminCollabState['joinRequests'][number], role: WorkspaceRole) => Promise<void>;
+  onRejectJoinRequest?: (requestUid: string) => Promise<void>;
+  onUpdateMemberRole?: (member: WorkspaceMember, email: string | undefined, role: WorkspaceRole) => Promise<void>;
+  onRemoveMember?: (memberUid: string) => Promise<void>;
+  onMigrateLocalToCloud?: () => Promise<number>;
 }
 
 const CLIENT_COLORS = [
@@ -147,10 +172,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onAddYear,
   onRemoveYear,
   onSelectYear,
-  onOpenChangeCredentials,
   onOpenExportImport,
   onResetWorkspace,
-  onClearWorkspaceData
+  onClearWorkspaceData,
+  currentUserUid,
+  userRole = 'editor',
+  members = [],
+  adminCollabState = null,
+  onRotateJoinCode,
+  onCreateEmailInvite,
+  onDeleteEmailInvite,
+  onApproveJoinRequest,
+  onRejectJoinRequest,
+  onUpdateMemberRole,
+  onRemoveMember,
+  onMigrateLocalToCloud
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -204,6 +240,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   );
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearFeedback, setClearFeedback] = useState<string | null>(null);
+
+  // Team & Collaboration state
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('editor');
+  const [teamBusy, setTeamBusy] = useState(false);
+  const [teamFeedback, setTeamFeedback] = useState<string | null>(null);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [copiedInvite, setCopiedInvite] = useState<'link' | 'code' | null>(null);
+  const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
 
   // Filter lists
   const filteredPeople = useMemo(() => {
@@ -393,6 +438,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     { id: 'clients', label: 'Clients', count: clients.length, icon: Briefcase },
     { id: 'projects', label: 'Projects', count: projects.length, icon: FolderKanban },
     { id: 'leaves', label: 'Time Off & Leaves', count: leaves.length, icon: CalendarOff },
+    {
+      id: 'team',
+      label: 'Team & Collaboration',
+      count: members.length + (adminCollabState?.joinRequests.length || 0),
+      icon: UserPlus
+    },
     { id: 'workspace', label: 'Years & System', icon: ShieldCheck }
   ];
 
@@ -507,7 +558,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           {/* Right Content Area */}
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-white dark:bg-slate-900">
             {/* Sub-header with Search & Primary Action for List Tabs */}
-            {activeTab !== 'departments' && activeTab !== 'workspace' && (
+            {activeTab !== 'departments' && activeTab !== 'workspace' && activeTab !== 'team' && (
               <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50 dark:bg-slate-900/50 shrink-0">
                 <div className="relative w-full sm:w-72">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -1537,26 +1588,55 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Security & Data Card */}
+                  {/* Cloud Sync & Migration Card */}
                   <div className="space-y-4">
                     <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
                       <div className="flex items-center gap-2.5">
-                        <KeyRound className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                        <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                         <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                          Admin Credentials & Security
+                          Cloud Sync & Local Browser Migration
                         </h3>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Update the administrator login username and password required to unlock the AlloCat workspace.
+                        Workspace changes sync automatically in real time with all collaborators. If you previously saved data locally in this browser, you can push it to the shared cloud workspace.
                       </p>
-                      <button
-                        type="button"
-                        onClick={onOpenChangeCredentials}
-                        className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                      >
-                        <KeyRound className="w-3.5 h-3.5 text-indigo-600" />
-                        <span>Change Login & Password</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('team')}
+                          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                        >
+                          <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Manage Collaborators ({members.length})</span>
+                        </button>
+                        {onMigrateLocalToCloud && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              setMigrationStatus(null);
+                              try {
+                                const count = await onMigrateLocalToCloud();
+                                setMigrationStatus(
+                                  `Migrated ${count} record${count === 1 ? '' : 's'} from local browser storage into the shared cloud workspace.`
+                                );
+                              } catch (err) {
+                                setMigrationStatus(
+                                  err instanceof Error ? err.message : 'Migration failed.'
+                                );
+                              }
+                            }}
+                            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <Upload className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Import Local Browser Data</span>
+                          </button>
+                        )}
+                      </div>
+                      {migrationStatus && (
+                        <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
+                          {migrationStatus}
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
@@ -1940,6 +2020,386 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   })()}
                 </div>
               )}
+
+              {/* TAB 7: TEAM & COLLABORATION */}
+              {activeTab === 'team' && (() => {
+                const isAdminUser = userRole === 'admin';
+                const activeJoinCode = adminCollabState?.joinCodes.find((c) => c.active)?.code || '';
+                const baseUrl =
+                  typeof window !== 'undefined'
+                    ? `${window.location.origin}${window.location.pathname}`
+                    : '';
+                const inviteLink = activeJoinCode ? `${baseUrl}?invite=${activeJoinCode}` : '';
+                const currentHost =
+                  typeof window !== 'undefined' ? window.location.hostname : '';
+
+                const copyText = async (value: string, type: 'link' | 'code') => {
+                  try {
+                    await navigator.clipboard.writeText(value);
+                    setCopiedInvite(type);
+                    setTimeout(() => setCopiedInvite(null), 1800);
+                  } catch {
+                    setTeamError('Could not copy to clipboard.');
+                  }
+                };
+
+                const handleInviteSubmit = async (e: React.FormEvent) => {
+                  e.preventDefault();
+                  if (!onCreateEmailInvite || !inviteEmail.trim()) return;
+                  setTeamError(null);
+                  setTeamFeedback(null);
+                  setTeamBusy(true);
+                  try {
+                    await onCreateEmailInvite(inviteEmail.trim(), inviteRole);
+                    setTeamFeedback(`Invited ${inviteEmail.trim().toLowerCase()} as ${inviteRole}.`);
+                    setInviteEmail('');
+                  } catch (err) {
+                    setTeamError(err instanceof Error ? err.message : 'Failed to invite user.');
+                  } finally {
+                    setTeamBusy(false);
+                  }
+                };
+
+                return (
+                  <div className="space-y-6">
+                    <div className="p-4 rounded-xl border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/60 dark:bg-emerald-950/25 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-start gap-2.5">
+                        <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400 mt-0.5 shrink-0" />
+                        <div>
+                          <h3 className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                            Live Shared Cloud Workspace Active
+                          </h3>
+                          <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                            Every edit to people, projects, leaves, and allocations is saved to Firestore and pushed live to all collaborators—both on GitHub Pages and in preview.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="px-2.5 py-1 text-[10px] font-mono font-semibold uppercase rounded-md bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300">
+                        Role: {userRole}
+                      </span>
+                    </div>
+
+                    {teamError && (
+                      <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
+                        {teamError}
+                      </div>
+                    )}
+                    {teamFeedback && (
+                      <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-700 dark:text-emerald-300">
+                        <CheckCircle2 className="w-4 h-4 shrink-0" />
+                        <span>{teamFeedback}</span>
+                      </div>
+                    )}
+
+                    {isAdminUser && (
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+                        {/* Shareable Invite Link */}
+                        <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <KeyRound className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                                Shareable Team Invite Link
+                              </h3>
+                            </div>
+                            {onRotateJoinCode && (
+                              <button
+                                type="button"
+                                disabled={teamBusy}
+                                onClick={async () => {
+                                  setTeamBusy(true);
+                                  setTeamError(null);
+                                  try {
+                                    await onRotateJoinCode();
+                                    setTeamFeedback('Generated a new team invite link.');
+                                  } catch (err) {
+                                    setTeamError(
+                                      err instanceof Error ? err.message : 'Failed to rotate invite code.'
+                                    );
+                                  } finally {
+                                    setTeamBusy(false);
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 cursor-pointer"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Rotate Link</span>
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Share this link with teammates. Anyone who signs in with Google via this link joins automatically as an Editor.
+                          </p>
+                          {inviteLink ? (
+                            <div className="space-y-2">
+                              <div className="flex gap-2">
+                                <input
+                                  type="text"
+                                  readOnly
+                                  value={inviteLink}
+                                  className="flex-1 px-3 py-1.5 text-[11px] font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => void copyText(inviteLink, 'link')}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer shrink-0"
+                                >
+                                  {copiedInvite === 'link' ? (
+                                    <Check className="w-3.5 h-3.5" />
+                                  ) : (
+                                    <Copy className="w-3.5 h-3.5" />
+                                  )}
+                                  <span>{copiedInvite === 'link' ? 'Copied' : 'Copy Link'}</span>
+                                </button>
+                              </div>
+                              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                                <span>
+                                  Invite Code:{' '}
+                                  <code className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                                    {activeJoinCode}
+                                  </code>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => void copyText(activeJoinCode, 'code')}
+                                  className="text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                                >
+                                  {copiedInvite === 'code' ? 'Code Copied' : 'Copy Code'}
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-xs text-slate-400">
+                              Click Rotate Link to generate an active invite code.
+                            </div>
+                          )}
+                          {currentHost && (
+                            <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">
+                              GitHub Pages / custom domains: ensure{' '}
+                              <code className="font-mono">{currentHost}</code> is listed under Firebase Console → Authentication → Authorized domains.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Invite by Email */}
+                        <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <Mail className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                            <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                              Invite by Google Email
+                            </h3>
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">
+                            Pre-authorize specific teammates by Google account email so they join automatically when signing in.
+                          </p>
+                          <form onSubmit={handleInviteSubmit} className="flex flex-wrap gap-2">
+                            <input
+                              type="email"
+                              required
+                              value={inviteEmail}
+                              onChange={(e) => setInviteEmail(e.target.value)}
+                              placeholder="colleague@company.com"
+                              className="flex-1 min-w-[180px] px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                            />
+                            <select
+                              value={inviteRole}
+                              onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
+                              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                            >
+                              <option value="editor">Editor</option>
+                              <option value="admin">Admin</option>
+                            </select>
+                            <button
+                              type="submit"
+                              disabled={teamBusy}
+                              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                            >
+                              Send Invite
+                            </button>
+                          </form>
+
+                          {adminCollabState && adminCollabState.invites.length > 0 && (
+                            <div className="space-y-1.5 pt-1">
+                              <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                Pending Email Invites
+                              </div>
+                              {adminCollabState.invites.map((inv) => (
+                                <div
+                                  key={inv.id}
+                                  className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="font-mono truncate">{inv.email}</span>
+                                    <span className="px-1.5 py-0.2 text-[10px] uppercase font-mono rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                                      {inv.role}
+                                    </span>
+                                  </div>
+                                  {onDeleteEmailInvite && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void onDeleteEmailInvite(inv.id)}
+                                      className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
+                                      title="Revoke invite"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Pending Access Requests (Admin only) */}
+                    {isAdminUser && adminCollabState && adminCollabState.joinRequests.length > 0 && (
+                      <div className="space-y-2.5">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                          Pending Access Requests ({adminCollabState.joinRequests.length})
+                        </h3>
+                        <div className="border border-amber-200 dark:border-amber-900/70 rounded-xl overflow-hidden divide-y divide-amber-100 dark:divide-amber-900/40 bg-amber-50/40 dark:bg-amber-950/15">
+                          {adminCollabState.joinRequests.map((req) => (
+                            <div
+                              key={req.uid}
+                              className="px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs"
+                            >
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                  {req.displayName}{' '}
+                                  <span className="font-mono font-normal text-slate-500">
+                                    ({req.email})
+                                  </span>
+                                </div>
+                                {req.note && (
+                                  <div className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
+                                    “{req.note}”
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {onApproveJoinRequest && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => void onApproveJoinRequest(req, 'editor')}
+                                      className="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer"
+                                    >
+                                      Approve Editor
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void onApproveJoinRequest(req, 'admin')}
+                                      className="px-2.5 py-1 text-[11px] font-semibold rounded-md bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                                    >
+                                      Approve Admin
+                                    </button>
+                                  </>
+                                )}
+                                {onRejectJoinRequest && (
+                                  <button
+                                    type="button"
+                                    onClick={() => void onRejectJoinRequest(req.uid)}
+                                    className="px-2 py-1 text-[11px] text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-md cursor-pointer"
+                                  >
+                                    Reject
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Active Collaborators Table */}
+                    <div className="space-y-2.5">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        Active Workspace Collaborators ({members.length})
+                      </h3>
+                      <div className="border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                        <table className="w-full text-left border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-300 border-b border-slate-200 dark:border-slate-800 font-semibold">
+                              <th className="py-2.5 px-4">Collaborator</th>
+                              <th className="py-2.5 px-3">Joined Via</th>
+                              <th className="py-2.5 px-3">Role</th>
+                              {isAdminUser && <th className="py-2.5 px-4 text-right">Actions</th>}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                            {members.map((m) => {
+                              const email = adminCollabState?.memberEmails[m.uid] || m.email;
+                              const isSelf = m.uid === currentUserUid;
+                              return (
+                                <tr
+                                  key={m.uid}
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                                >
+                                  <td className="py-2.5 px-4">
+                                    <div className="font-semibold text-slate-900 dark:text-slate-100">
+                                      {m.displayName}
+                                      {isSelf && (
+                                        <span className="ml-2 text-[10px] font-mono text-indigo-600 dark:text-indigo-400">
+                                          (You)
+                                        </span>
+                                      )}
+                                    </div>
+                                    {email && (
+                                      <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                                        {email}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono text-[11px] text-slate-500 dark:text-slate-400 uppercase">
+                                    {m.joinedVia}
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    {isAdminUser && !isSelf && onUpdateMemberRole ? (
+                                      <select
+                                        value={m.role}
+                                        onChange={(e) =>
+                                          void onUpdateMemberRole(
+                                            m,
+                                            email,
+                                            e.target.value as WorkspaceRole
+                                          )
+                                        }
+                                        className="px-2 py-1 text-xs rounded-md border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                                      >
+                                        <option value="editor">Editor</option>
+                                        <option value="admin">Admin</option>
+                                      </select>
+                                    ) : (
+                                      <span className="px-2 py-0.5 text-[10px] font-mono font-semibold uppercase rounded bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                        {m.role}
+                                      </span>
+                                    )}
+                                  </td>
+                                  {isAdminUser && (
+                                    <td className="py-2.5 px-4 text-right">
+                                      {!isSelf && onRemoveMember && (
+                                        <button
+                                          type="button"
+                                          onClick={() => void onRemoveMember(m.uid)}
+                                          className="p-1.5 text-slate-400 hover:text-rose-600 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer"
+                                          title="Remove collaborator access"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </td>
+                                  )}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

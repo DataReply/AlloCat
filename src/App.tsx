@@ -48,39 +48,69 @@ import {
 import { ReportingModal, ReportTab } from './components/ReportingModal';
 import { StandaloneAppModal } from './components/StandaloneAppModal';
 import { useOnlineStatus } from './utils/usePWAInstall';
-import {
-  LoginOverlay,
-  ChangeCredentialsModal,
-  AuthCredentials,
-  DEFAULT_AUTH_CREDENTIALS
-} from './components/LoginOverlay';
+import { onAuthStateChanged, User } from 'firebase/auth';
+import { auth, signOutUser } from './firebase';
+import { LoginOverlay } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
 import {
   initSQLiteWorkspace,
-  syncAppStateToSQLite,
-  saveAuthCredentialsToSQLite,
-  resetSQLiteWorkspace
+  syncAppStateToSQLite
 } from './utils/sqliteDatabase';
+import {
+  AdminCollabState,
+  WorkspaceJoinRequest,
+  WorkspaceMember,
+  WorkspaceRole,
+  approveJoinRequest,
+  checkOrJoinWorkspace,
+  createWorkspaceEmailInvite,
+  deleteWorkspaceEmailInvite,
+  rejectJoinRequest,
+  removeCollaborator,
+  rotateWorkspaceJoinCode,
+  subscribeToAdminCollabState,
+  subscribeToMemberAccess,
+  subscribeToWorkspaceData,
+  syncWorkspaceDeltaToFirestore,
+  updateCollaboratorRole
+} from './utils/firestoreSync';
 
 export function App() {
   const isOnline = useOnlineStatus();
   const [appState, setAppState] = useState<AppState>(() => getDefaultAppState());
-  const [isSqliteBooted, setIsSqliteBooted] = useState(false);
-  const isSqliteReadyRef = useRef(false);
-  const skipNextSqliteSyncRef = useRef(false);
-  const [viewMode, setViewMode] = useState<ViewMode>('clients');
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
-  const [authCredentials, setAuthCredentials] = useState<AuthCredentials>(
-    DEFAULT_AUTH_CREDENTIALS
+  const [authReady, setAuthReady] = useState(false);
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [accessStatus, setAccessStatus] = useState<'checking' | 'needs_access' | 'granted'>(
+    'checking'
   );
-  const [currentUser, setCurrentUser] = useState<string | null>(() => {
+  const [accessDeniedReason, setAccessDeniedReason] = useState<string | null>(null);
+  const [existingJoinRequest, setExistingJoinRequest] = useState<WorkspaceJoinRequest | null>(
+    null
+  );
+  const [currentMember, setCurrentMember] = useState<WorkspaceMember | null>(null);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
+  const [adminCollabState, setAdminCollabState] = useState<AdminCollabState | null>(null);
+  const [isWorkspaceHydrated, setIsWorkspaceHydrated] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [initialInviteCode] = useState<string>(() => {
     try {
-      return sessionStorage.getItem('allocat_auth_user');
+      return new URLSearchParams(window.location.search).get('invite') || '';
     } catch {
-      return null;
+      return '';
     }
   });
-  const [isChangeCredentialsOpen, setIsChangeCredentialsOpen] = useState(false);
+  const [accessCheckNonce, setAccessCheckNonce] = useState(0);
+
+  const isCloudReadyRef = useRef(false);
+  const isApplyingRemoteRef = useRef(false);
+  const lastCloudStateRef = useRef<AppState>(appState);
+  const pendingWritesCountRef = useRef(0);
+  const syncQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const selectedYearRef = useRef<number>(appState.selectedYear);
+  const isSqliteMirrorReadyRef = useRef(false);
+
+  const [viewMode, setViewMode] = useState<ViewMode>('clients');
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
 
   const [filters, setFilters] = useState<FilterState>({
     search: '',
@@ -151,32 +181,196 @@ export function App() {
   }>({ isOpen: false, tab: 'departments' });
   const [isStandaloneModalOpen, setIsStandaloneModalOpen] = useState(false);
 
-  // Boot SQLite WebAssembly engine and hydrate workspace + auth tables (with one-time legacy migration)
+  useEffect(() => {
+    selectedYearRef.current = appState.selectedYear;
+  }, [appState.selectedYear]);
+
+  // Boot local SQLite engine in background solely as an export/SQL console mirror
   useEffect(() => {
     let cancelled = false;
-    initSQLiteWorkspace().then(({ state, authCredentials: loadedCreds }) => {
-      if (cancelled) return;
-      isSqliteReadyRef.current = true;
-      skipNextSqliteSyncRef.current = true;
-      setAppState(state);
-      setAuthCredentials(loadedCreds);
-      setExpandedProjectIds(new Set(state.projects.map((p) => p.id)));
-      setIsSqliteBooted(true);
+    initSQLiteWorkspace().then(() => {
+      if (!cancelled) {
+        isSqliteMirrorReadyRef.current = true;
+      }
     });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  // Synchronize workspace state changes directly into normalized SQLite tables
+  // Listen to Firebase Auth state
   useEffect(() => {
-    if (!isSqliteReadyRef.current) return;
-    if (skipNextSqliteSyncRef.current) {
-      skipNextSqliteSyncRef.current = false;
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setAuthReady(true);
+      if (!user) {
+        isCloudReadyRef.current = false;
+        setIsWorkspaceHydrated(false);
+        setAccessStatus('checking');
+        setCurrentMember(null);
+        setWorkspaceMembers([]);
+        setAdminCollabState(null);
+        setExistingJoinRequest(null);
+        setAccessDeniedReason(null);
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Verify or initialize workspace membership whenever authenticated user changes
+  useEffect(() => {
+    if (!firebaseUser) return;
+    let cancelled = false;
+    setAccessStatus('checking');
+    setAccessDeniedReason(null);
+
+    checkOrJoinWorkspace(firebaseUser, initialInviteCode)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.status === 'granted') {
+          setCurrentMember(res.member);
+          setAccessStatus('granted');
+          setExistingJoinRequest(null);
+          if (initialInviteCode && typeof window !== 'undefined') {
+            try {
+              const url = new URL(window.location.href);
+              if (url.searchParams.has('invite')) {
+                url.searchParams.delete('invite');
+                window.history.replaceState({}, '', url.toString());
+              }
+            } catch {
+              // ignore URL cleanup errors
+            }
+          }
+        } else {
+          setExistingJoinRequest(res.existingRequest);
+          setAccessStatus('needs_access');
+        }
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setAccessDeniedReason(
+          err instanceof Error ? err.message : 'Unable to verify workspace access.'
+        );
+        setAccessStatus('needs_access');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [firebaseUser, initialInviteCode, accessCheckNonce]);
+
+  // Auto-unlock while waiting for admin approval
+  useEffect(() => {
+    if (!firebaseUser || accessStatus !== 'needs_access') return;
+    return subscribeToMemberAccess(firebaseUser.uid, () => {
+      setAccessCheckNonce((n) => n + 1);
+    });
+  }, [firebaseUser, accessStatus]);
+
+  // Subscribe to real-time collaborative Firestore workspace once granted access
+  useEffect(() => {
+    if (!firebaseUser || accessStatus !== 'granted') return;
+
+    let firstHydration = true;
+    const unsub = subscribeToWorkspaceData({
+      onStateHydrated: (cloudState) => {
+        lastCloudStateRef.current = cloudState;
+        if (pendingWritesCountRef.current > 0) {
+          return;
+        }
+        isApplyingRemoteRef.current = true;
+        const preferredYear = selectedYearRef.current;
+        const mergedSelectedYear = cloudState.availableYears.includes(preferredYear)
+          ? preferredYear
+          : cloudState.selectedYear;
+        const nextHydrated: AppState = {
+          ...cloudState,
+          selectedYear: mergedSelectedYear
+        };
+        setAppState(nextHydrated);
+        if (firstHydration) {
+          firstHydration = false;
+          setExpandedProjectIds(new Set(nextHydrated.projects.map((p) => p.id)));
+          isCloudReadyRef.current = true;
+          setIsWorkspaceHydrated(true);
+        }
+        if (isSqliteMirrorReadyRef.current) {
+          syncAppStateToSQLite(nextHydrated);
+        }
+      },
+      onMembersUpdate: (members) => {
+        setWorkspaceMembers(members);
+        const me = members.find((m) => m.uid === firebaseUser.uid);
+        if (me) {
+          setCurrentMember((prev) =>
+            prev ? { ...prev, role: me.role, displayName: me.displayName } : me
+          );
+        }
+      },
+      onSyncError: () => {
+        setSyncStatus('error');
+      }
+    });
+
+    return () => {
+      unsub();
+      isCloudReadyRef.current = false;
+    };
+  }, [firebaseUser, accessStatus]);
+
+  // Subscribe to admin collaboration metadata when user is an admin
+  useEffect(() => {
+    if (!firebaseUser || accessStatus !== 'granted' || currentMember?.role !== 'admin') {
+      setAdminCollabState(null);
       return;
     }
-    syncAppStateToSQLite(appState);
-  }, [appState]);
+    return subscribeToAdminCollabState(
+      (collab) => {
+        setAdminCollabState(collab);
+      },
+      (err) => {
+        console.warn('Admin collaboration listener error:', err);
+      }
+    );
+  }, [firebaseUser, accessStatus, currentMember?.role]);
+
+  // Push local workspace mutations to Firestore via queued delta sync
+  useEffect(() => {
+    if (!isCloudReadyRef.current || !firebaseUser || accessStatus !== 'granted') return;
+    if (isApplyingRemoteRef.current) {
+      isApplyingRemoteRef.current = false;
+      return;
+    }
+
+    const nextSnapshot = appState;
+    pendingWritesCountRef.current += 1;
+    setSyncStatus('syncing');
+
+    syncQueueRef.current = syncQueueRef.current
+      .then(async () => {
+        const prevSnapshot = lastCloudStateRef.current;
+        const syncedState = await syncWorkspaceDeltaToFirestore(
+          prevSnapshot,
+          nextSnapshot,
+          firebaseUser
+        );
+        lastCloudStateRef.current = syncedState;
+        if (isSqliteMirrorReadyRef.current) {
+          syncAppStateToSQLite(syncedState);
+        }
+      })
+      .catch((err) => {
+        console.error('Firestore delta sync failed:', err);
+        setSyncStatus('error');
+      })
+      .finally(() => {
+        pendingWritesCountRef.current = Math.max(0, pendingWritesCountRef.current - 1);
+        if (pendingWritesCountRef.current === 0) {
+          setSyncStatus((prev) => (prev === 'error' ? 'error' : 'synced'));
+        }
+      });
+  }, [appState, firebaseUser, accessStatus]);
 
   // Toggle dark mode class on root html element
   useEffect(() => {
@@ -1026,33 +1220,33 @@ export function App() {
     };
   }, [activeCellEditor, people, projects, allocations, selectedYear]);
 
-  if (!isSqliteBooted) {
+  if (!authReady || (firebaseUser && accessStatus === 'checking') || (firebaseUser && accessStatus === 'granted' && !isWorkspaceHydrated)) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-200 text-xs font-mono">
-        Initializing SQLite relational workspace...
+        Connecting to shared AlloCat cloud workspace...
       </div>
     );
   }
 
+  const isAuthenticatedWorkspace = Boolean(firebaseUser && accessStatus === 'granted');
+  const currentUserLabel =
+    currentMember?.displayName || firebaseUser?.displayName || firebaseUser?.email || null;
+
   return (
     <div className="h-screen overflow-hidden flex flex-col bg-slate-200/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative">
-      {!currentUser && (
+      {!isAuthenticatedWorkspace && (
         <LoginOverlay
-          credentials={authCredentials}
-          onLoginSuccess={(username) => {
-            try {
-              sessionStorage.setItem('allocat_auth_user', username);
-            } catch {
-              // ignore storage errors
-            }
-            setCurrentUser(username);
-          }}
+          firebaseUser={firebaseUser}
+          accessDeniedReason={accessDeniedReason}
+          existingRequest={existingJoinRequest}
+          initialInviteCode={initialInviteCode}
+          onAccessGranted={() => setAccessCheckNonce((n) => n + 1)}
         />
       )}
 
       <div
         className={`h-full flex flex-col overflow-hidden transition-all duration-300 ${
-          !currentUser ? 'blur-md pointer-events-none select-none' : ''
+          !isAuthenticatedWorkspace ? 'blur-md pointer-events-none select-none' : ''
         }`}
       >
         <Header
@@ -1077,8 +1271,11 @@ export function App() {
           onOpenAddLeaveModal={() => setLeaveModalState({ isOpen: true })}
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode((d) => !d)}
-          currentUser={currentUser}
-          onOpenChangeCredentialsModal={() => setIsChangeCredentialsOpen(true)}
+          currentUser={currentUserLabel}
+          userRole={currentMember?.role || 'editor'}
+          syncStatus={syncStatus}
+          collaboratorCount={Math.max(1, workspaceMembers.length)}
+          pendingRequestsCount={adminCollabState?.joinRequests.length || 0}
           onOpenAdminPanel={(tab = 'people') =>
             setAdminPanelState({ isOpen: true, tab })
           }
@@ -1087,12 +1284,7 @@ export function App() {
           }
           onOpenStandaloneModal={() => setIsStandaloneModalOpen(true)}
           onLogout={() => {
-            try {
-              sessionStorage.removeItem('allocat_auth_user');
-            } catch {
-              // ignore storage errors
-            }
-            setCurrentUser(null);
+            void signOutUser();
           }}
         />
 
@@ -1308,7 +1500,7 @@ export function App() {
         leaves={leaves}
         availableYears={availableYears}
         selectedYear={selectedYear}
-        currentUser={currentUser}
+        currentUser={currentUserLabel}
         onOpenAddPerson={() => {
           setPersonToEdit(null);
           setIsAddPersonOpen(true);
@@ -1347,7 +1539,6 @@ export function App() {
         onAddYear={handleAddYear}
         onRemoveYear={handleRemoveYear}
         onSelectYear={(yr) => setAppState((prev) => ({ ...prev, selectedYear: yr }))}
-        onOpenChangeCredentials={() => setIsChangeCredentialsOpen(true)}
         onOpenExportImport={(scope = 'admin') => {
           setExportModalScope(scope);
           setIsExportModalOpen(true);
@@ -1355,9 +1546,42 @@ export function App() {
         onResetWorkspace={() => {
           const fresh = getDefaultAppState();
           setAppState(fresh);
-          resetSQLiteWorkspace();
         }}
         onClearWorkspaceData={handleClearWorkspaceData}
+        currentUserUid={firebaseUser?.uid}
+        userRole={currentMember?.role || 'editor'}
+        members={workspaceMembers}
+        adminCollabState={adminCollabState}
+        onRotateJoinCode={
+          firebaseUser
+            ? async () => {
+                await rotateWorkspaceJoinCode(firebaseUser, adminCollabState?.joinCodes || []);
+              }
+            : undefined
+        }
+        onCreateEmailInvite={
+          firebaseUser
+            ? async (email: string, role: WorkspaceRole) => {
+                await createWorkspaceEmailInvite(firebaseUser, email, role);
+              }
+            : undefined
+        }
+        onDeleteEmailInvite={deleteWorkspaceEmailInvite}
+        onApproveJoinRequest={approveJoinRequest}
+        onRejectJoinRequest={rejectJoinRequest}
+        onUpdateMemberRole={updateCollaboratorRole}
+        onRemoveMember={removeCollaborator}
+        onMigrateLocalToCloud={async () => {
+          const local = await initSQLiteWorkspace();
+          setAppState(local.state);
+          return (
+            local.state.people.length +
+            local.state.clients.length +
+            local.state.projects.length +
+            local.state.allocations.length +
+            local.state.leaves.length
+          );
+        }}
       />
 
       <ReportingModal
@@ -1463,27 +1687,10 @@ export function App() {
         onResetToDefault={() => {
           const fresh = getDefaultAppState();
           setAppState(fresh);
-          resetSQLiteWorkspace();
         }}
         onOpenStandaloneModal={() => {
           setIsExportModalOpen(false);
           setIsStandaloneModalOpen(true);
-        }}
-      />
-
-      <ChangeCredentialsModal
-        isOpen={isChangeCredentialsOpen}
-        onClose={() => setIsChangeCredentialsOpen(false)}
-        currentCredentials={authCredentials}
-        onSaveCredentials={(newCreds) => {
-          saveAuthCredentialsToSQLite(newCreds);
-          setAuthCredentials(newCreds);
-          setCurrentUser(newCreds.username);
-          try {
-            sessionStorage.setItem('allocat_auth_user', newCreds.username);
-          } catch {
-            // ignore storage errors
-          }
         }}
       />
 

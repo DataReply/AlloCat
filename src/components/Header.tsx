@@ -10,13 +10,15 @@ import {
   UserCheck,
   Cat,
   LogOut,
-  KeyRound,
   ChevronDown,
   ShieldCheck,
   Building2,
   FolderKanban,
   Monitor,
-  BarChart3
+  BarChart3,
+  Cloud,
+  RefreshCw,
+  UserPlus
 } from 'lucide-react';
 import { ViewMode } from '../types';
 import { AdminTab } from './AdminPanelModal';
@@ -39,8 +41,11 @@ interface HeaderProps {
   isDarkMode: boolean;
   onToggleDarkMode: () => void;
   currentUser?: string | null;
+  userRole?: 'admin' | 'editor';
+  syncStatus?: 'synced' | 'syncing' | 'error';
+  collaboratorCount?: number;
+  pendingRequestsCount?: number;
   onLogout?: () => void;
-  onOpenChangeCredentialsModal?: () => void;
   onOpenAdminPanel?: (tab?: AdminTab) => void;
   onOpenReportingModal?: (tab?: ReportTab) => void;
   onOpenStandaloneModal?: () => void;
@@ -62,8 +67,11 @@ export const Header: React.FC<HeaderProps> = ({
   isDarkMode,
   onToggleDarkMode,
   currentUser,
+  userRole = 'editor',
+  syncStatus = 'synced',
+  collaboratorCount = 1,
+  pendingRequestsCount = 0,
   onLogout,
-  onOpenChangeCredentialsModal,
   onOpenAdminPanel,
   onOpenReportingModal,
   onOpenStandaloneModal
@@ -139,8 +147,8 @@ export const Header: React.FC<HeaderProps> = ({
                     {currentUser || 'admin'}
                   </div>
                 </div>
-                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 rounded border border-indigo-200/70 dark:border-indigo-800">
-                  Admin
+                <span className="px-2 py-0.5 text-[10px] font-mono font-semibold bg-indigo-50 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 rounded border border-indigo-200/70 dark:border-indigo-800 uppercase">
+                  {userRole}
                 </span>
               </div>
 
@@ -275,17 +283,22 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
 
-                {onOpenChangeCredentialsModal && (
+                {onOpenAdminPanel && (
                   <button
                     type="button"
                     onClick={() => {
                       setIsUserMenuOpen(false);
-                      onOpenChangeCredentialsModal();
+                      onOpenAdminPanel('team');
                     }}
-                    className="w-full px-3.5 py-2 text-left flex items-center gap-2.5 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
+                    className="w-full px-3.5 py-2 text-left flex items-center justify-between text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
-                    <KeyRound className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-                    <span>Change Login & Password</span>
+                    <div className="flex items-center gap-2.5">
+                      <UserPlus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                      <span>Team & Collaboration</span>
+                    </div>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      {collaboratorCount}
+                    </span>
                   </button>
                 )}
 
@@ -477,6 +490,38 @@ export const Header: React.FC<HeaderProps> = ({
               <AlertTriangle className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
               <span className="font-mono tabular-nums font-semibold">{overtimeCount}</span>
               <span className="hidden md:inline">Overtime Alerts</span>
+            </button>
+          )}
+
+          {onOpenAdminPanel && (
+            <button
+              type="button"
+              onClick={() => onOpenAdminPanel('team')}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700/80 rounded-lg transition-colors border border-slate-300/80 dark:border-slate-700 shadow-2xs cursor-pointer whitespace-nowrap"
+              title="Cloud sync status & team collaboration invites"
+            >
+              {syncStatus === 'syncing' ? (
+                <RefreshCw className="w-3.5 h-3.5 text-amber-500 animate-spin" />
+              ) : syncStatus === 'error' ? (
+                <Cloud className="w-3.5 h-3.5 text-rose-500" />
+              ) : (
+                <Cloud className="w-3.5 h-3.5 text-emerald-500" />
+              )}
+              <span className="hidden lg:inline">
+                {syncStatus === 'syncing'
+                  ? 'Syncing'
+                  : syncStatus === 'error'
+                  ? 'Sync Issue'
+                  : 'Team'}
+              </span>
+              <span className="font-mono text-[11px] font-semibold px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200">
+                {collaboratorCount}
+              </span>
+              {pendingRequestsCount > 0 && (
+                <span className="px-1.5 py-0.2 text-[10px] font-mono font-bold bg-amber-500 text-white rounded">
+                  +{pendingRequestsCount}
+                </span>
+              )}
             </button>
           )}
 

@@ -64,6 +64,7 @@ const SQLITE_IDB_NAME = 'allocat_sqlite_idb';
 const SQLITE_IDB_STORE = 'databases';
 const SQLITE_IDB_KEY = 'workspace.sqlite';
 const SQLITE_B64_KEY = 'allocat_sqlite_b64_v1';
+const SQLITE_IDB_PENDING_KEY = 'allocat_sqlite_idb_pending_v1';
 const LEGACY_STATE_KEY = 'allocat_app_state_v1';
 const LEGACY_V2_KEY = 'staffgrid_app_state_v2';
 const LEGACY_AUTH_KEY = 'allocat_auth_credentials_v1';
@@ -228,6 +229,17 @@ let lastSyncedAt: string = new Date().toISOString();
 let lastByteSize = 0;
 let storageBackend: SQLiteDatabaseStats['storageBackend'] = 'memory';
 let lastEngineError: string | undefined;
+let persistGeneration = 0;
+let sqliteOpQueue: Promise<unknown> = Promise.resolve();
+
+function enqueueSqliteOp<T>(op: () => Promise<T>): Promise<T> {
+  const next = sqliteOpQueue.then(op, op);
+  sqliteOpQueue = next.then(
+    () => undefined,
+    () => undefined
+  );
+  return next;
+}
 
 function getSqlWasmBasePaths(): string[] {
   if (typeof window === 'undefined') return ['./sql-wasm/'];
@@ -1015,11 +1027,32 @@ function buildStatsFromState(state: AppState, db?: SqlJsDatabase | null): SQLite
 }
 
 async function persistActiveDb(db: SqlJsDatabase): Promise<void> {
+  const gen = ++persistGeneration;
   const bytes = db.export();
   lastByteSize = bytes.byteLength;
   lastSyncedAt = new Date().toISOString();
-  const idbSaved = await writeBinaryToIdb(bytes);
+
   const lsSaved = writeBinaryToLocalStorage(bytes);
+  try {
+    if (lsSaved) {
+      localStorage.setItem(SQLITE_IDB_PENDING_KEY, '1');
+    } else {
+      localStorage.removeItem(SQLITE_B64_KEY);
+      localStorage.removeItem(SQLITE_IDB_PENDING_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+
+  const idbSaved = await writeBinaryToIdb(bytes);
+  if (idbSaved && gen === persistGeneration) {
+    try {
+      localStorage.removeItem(SQLITE_IDB_PENDING_KEY);
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
   if (idbSaved) storageBackend = 'indexeddb+localstorage';
   else if (lsSaved) storageBackend = 'localstorage';
   else storageBackend = 'memory';
@@ -1051,13 +1084,23 @@ export async function initSQLiteWorkspace(): Promise<{
 
     const idbBytes = await readBinaryFromIdb();
     const lsBytes = readBinaryFromLocalStorage();
-    const existingBytes = embeddedBytes || idbBytes || lsBytes;
+    let isIdbPending = false;
+    try {
+      isIdbPending = localStorage.getItem(SQLITE_IDB_PENDING_KEY) === '1';
+    } catch {
+      isIdbPending = false;
+    }
+    const existingBytes =
+      embeddedBytes || (isIdbPending && lsBytes ? lsBytes : idbBytes || lsBytes);
 
     if (existingBytes && isSQLiteBinaryHeader(existingBytes)) {
       try {
         const db = new SQL.Database(existingBytes);
         ensureSchema(db);
         const hydrated = readAppStateFromDb(db);
+        const hasWorkspaceMeta =
+          tableExists(db, 'workspace_meta') &&
+          queryRows(db, 'SELECT key FROM workspace_meta LIMIT 1;').length > 0;
         let authCreds = readAuthUserFromDb(db);
 
         if (!authCreds) {
@@ -1066,11 +1109,15 @@ export async function initSQLiteWorkspace(): Promise<{
           await persistActiveDb(db);
         }
 
-        if (hydrated && hydrated.people.length + hydrated.clients.length + hydrated.projects.length > 0) {
+        if (
+          hydrated &&
+          (hasWorkspaceMeta ||
+            hydrated.people.length + hydrated.clients.length + hydrated.projects.length > 0)
+        ) {
           activeDb = db;
           lastByteSize = existingBytes.byteLength;
-          storageBackend = idbBytes ? 'indexeddb+localstorage' : 'localstorage';
-          if (embeddedBytes && !idbBytes) {
+          storageBackend = idbBytes && !isIdbPending ? 'indexeddb+localstorage' : 'localstorage';
+          if ((embeddedBytes && !idbBytes) || (isIdbPending && lsBytes && !embeddedBytes)) {
             await persistActiveDb(db);
           }
           cleanupLegacyLocalStorageKeys();
@@ -1109,33 +1156,37 @@ export async function initSQLiteWorkspace(): Promise<{
 }
 
 export async function syncAppStateToSQLite(state: AppState): Promise<SQLiteDatabaseStats> {
-  try {
-    syncLeaveTypeConfigRegistry(state.leaveTypes);
-    const SQL = await getSqlJs();
-    if (!activeDb) {
-      activeDb = new SQL.Database();
+  return enqueueSqliteOp(async () => {
+    try {
+      syncLeaveTypeConfigRegistry(state.leaveTypes);
+      const SQL = await getSqlJs();
+      if (!activeDb) {
+        activeDb = new SQL.Database();
+      }
+      writeStateIntoDb(activeDb, state);
+      await persistActiveDb(activeDb);
+      return buildStatsFromState(state, activeDb);
+    } catch {
+      return buildStatsFromState(state, activeDb);
     }
-    writeStateIntoDb(activeDb, state);
-    await persistActiveDb(activeDb);
-    return buildStatsFromState(state, activeDb);
-  } catch {
-    return buildStatsFromState(state, activeDb);
-  }
+  });
 }
 
 export async function saveAuthCredentialsToSQLite(creds: SQLiteAuthCredentials): Promise<void> {
-  try {
-    const SQL = await getSqlJs();
-    if (!activeDb) {
-      activeDb = new SQL.Database();
-      ensureSchema(activeDb);
+  return enqueueSqliteOp(async () => {
+    try {
+      const SQL = await getSqlJs();
+      if (!activeDb) {
+        activeDb = new SQL.Database();
+        ensureSchema(activeDb);
+      }
+      writeAuthUserIntoDb(activeDb, creds);
+      await persistActiveDb(activeDb);
+      cleanupLegacyLocalStorageKeys();
+    } catch {
+      // Ignore errors if WASM unavailable
     }
-    writeAuthUserIntoDb(activeDb, creds);
-    await persistActiveDb(activeDb);
-    cleanupLegacyLocalStorageKeys();
-  } catch {
-    // Ignore errors if WASM unavailable
-  }
+  });
 }
 
 export async function resetSQLiteWorkspace(): Promise<{
@@ -1153,13 +1204,15 @@ export function getSQLiteDatabaseStats(state: AppState): SQLiteDatabaseStats {
 }
 
 export async function exportSQLiteBinaryFile(state: AppState): Promise<Uint8Array> {
-  const SQL = await getSqlJs();
-  if (!activeDb) {
-    activeDb = new SQL.Database();
-  }
-  writeStateIntoDb(activeDb, state);
-  await persistActiveDb(activeDb);
-  return activeDb.export();
+  return enqueueSqliteOp(async () => {
+    const SQL = await getSqlJs();
+    if (!activeDb) {
+      activeDb = new SQL.Database();
+    }
+    writeStateIntoDb(activeDb, state);
+    await persistActiveDb(activeDb);
+    return activeDb.export();
+  });
 }
 
 export async function exportSQLiteBase64Snapshot(state: AppState): Promise<string> {

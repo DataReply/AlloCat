@@ -1,0 +1,760 @@
+{
+  "entities": {
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Global administrator privilege record keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "addedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "addedByUid", "createdAt"]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Shared collaborative AlloCat workspace configuration, years, departments, and leave types.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "ownerId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "availableYears": {
+          "type": "array",
+          "description": "Ordered list of configured planning years."
+        },
+        "selectedYear": {
+          "type": "integer"
+        },
+        "departments": {
+          "type": "array",
+          "description": "List of active department names."
+        },
+        "leaveTypes": {
+          "type": "object",
+          "description": "Map of leave type keys to metadata objects."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedByName": {
+          "type": "string",
+          "maxLength": 120
+        }
+      },
+      "required": [
+        "name",
+        "ownerId",
+        "availableYears",
+        "selectedYear",
+        "departments",
+        "leaveTypes",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid",
+        "updatedByName"
+      ]
+    },
+    "WorkspaceMember": {
+      "title": "WorkspaceMember",
+      "description": "Team collaborator profile inside a workspace (PII isolated into memberPrivate).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "editor"]
+        },
+        "joinedVia": {
+          "type": "string",
+          "enum": ["bootstrap", "invite", "code", "approval"]
+        },
+        "inviteCode": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "inviteId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "photoURL",
+        "role",
+        "joinedVia",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "WorkspaceMemberPrivate": {
+      "title": "WorkspaceMemberPrivate",
+      "description": "Isolated PII record containing a collaborator's email address.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "JoinCode": {
+      "title": "JoinCode",
+      "description": "Shareable workspace invite code allowing verified team members to join as editors.",
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 6,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["code", "label", "active", "createdByUid", "createdAt", "updatedAt"]
+    },
+    "WorkspaceInvite": {
+      "title": "WorkspaceInvite",
+      "description": "Email-targeted collaborator invitation created by a workspace admin.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 180
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "editor"]
+        },
+        "invitedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["id", "email", "role", "invitedByUid", "createdAt", "updatedAt"]
+    },
+    "JoinRequest": {
+      "title": "JoinRequest",
+      "description": "Access request submitted by a signed-in user awaiting admin approval.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 180
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "displayName", "email", "photoURL", "note", "status", "createdAt", "updatedAt"]
+    },
+    "PersonRecord": {
+      "title": "PersonRecord",
+      "description": "Team member capacity profile inside a workspace.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "firstName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "lastName": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "department": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "employmentType": {
+          "type": "string",
+          "enum": ["Internal", "External", "B2B"]
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 180
+        },
+        "maxCapacityPercent": {
+          "type": "number"
+        },
+        "avatarColor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "initials": {
+          "type": "string",
+          "maxLength": 10
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "firstName",
+        "lastName",
+        "name",
+        "role",
+        "department",
+        "employmentType",
+        "email",
+        "maxCapacityPercent",
+        "avatarColor",
+        "initials",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    },
+    "ClientRecord": {
+      "title": "ClientRecord",
+      "description": "Client portfolio account inside a workspace.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "industry": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "color": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "lead", "completed"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "name",
+        "industry",
+        "color",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    },
+    "ProjectRecord": {
+      "title": "ProjectRecord",
+      "description": "Client deliverable project inside a workspace.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "clientId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "code": {
+          "type": "string",
+          "maxLength": 40
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "planned", "completed"]
+        },
+        "color": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "billable": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "clientId",
+        "name",
+        "code",
+        "status",
+        "color",
+        "billable",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    },
+    "AllocationRecord": {
+      "title": "AllocationRecord",
+      "description": "Annual 12-month staffing allocation percentages and statuses for a person-project pair.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "personId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "projectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "year": {
+          "type": "integer"
+        },
+        "monthlyPercentage": {
+          "type": "array",
+          "description": "12 monthly allocation percentages (Jan-Dec)."
+        },
+        "monthlyStatus": {
+          "type": "array",
+          "description": "12 monthly allocation statuses (unknown, planned, confirmed)."
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "personId",
+        "projectId",
+        "year",
+        "monthlyPercentage",
+        "monthlyStatus",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    },
+    "LeaveRecord": {
+      "title": "LeaveRecord",
+      "description": "Scheduled time off / leave entry reducing a team member's capacity.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "workspaceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "personId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 160
+        },
+        "year": {
+          "type": "integer"
+        },
+        "startMonth": {
+          "type": "integer"
+        },
+        "endMonth": {
+          "type": "integer"
+        },
+        "impactPercent": {
+          "type": "number"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedByUid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        }
+      },
+      "required": [
+        "id",
+        "workspaceId",
+        "personId",
+        "type",
+        "title",
+        "year",
+        "startMonth",
+        "endMonth",
+        "impactPercent",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "updatedByUid"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{userId}": {
+      "schema": {
+        "$ref": "#/entities/AdminUser"
+      },
+      "description": "Global administrator privilege documents keyed by Firebase Auth UID."
+    },
+    "/workspaces/{workspaceId}": {
+      "schema": {
+        "$ref": "#/entities/Workspace"
+      },
+      "description": "Shared collaborative workspace configuration, years, departments, and leave types."
+    },
+    "/workspaces/{workspaceId}/members/{userId}": {
+      "schema": {
+        "$ref": "#/entities/WorkspaceMember"
+      },
+      "description": "Authorized workspace collaborators (public display info and role)."
+    },
+    "/workspaces/{workspaceId}/memberPrivate/{userId}": {
+      "schema": {
+        "$ref": "#/entities/WorkspaceMemberPrivate"
+      },
+      "description": "Private PII (email) for workspace collaborators."
+    },
+    "/workspaces/{workspaceId}/joinCodes/{codeId}": {
+      "schema": {
+        "$ref": "#/entities/JoinCode"
+      },
+      "description": "Shareable workspace invite codes enabling verified users to join as editors."
+    },
+    "/workspaces/{workspaceId}/invites/{inviteId}": {
+      "schema": {
+        "$ref": "#/entities/WorkspaceInvite"
+      },
+      "description": "Email-based workspace invitations issued by administrators."
+    },
+    "/workspaces/{workspaceId}/joinRequests/{requestUid}": {
+      "schema": {
+        "$ref": "#/entities/JoinRequest"
+      },
+      "description": "Pending access requests from signed-in users awaiting administrator approval."
+    },
+    "/workspaces/{workspaceId}/people/{personId}": {
+      "schema": {
+        "$ref": "#/entities/PersonRecord"
+      },
+      "description": "Workspace team members and capacity profiles."
+    },
+    "/workspaces/{workspaceId}/clients/{clientId}": {
+      "schema": {
+        "$ref": "#/entities/ClientRecord"
+      },
+      "description": "Workspace client accounts."
+    },
+    "/workspaces/{workspaceId}/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/ProjectRecord"
+      },
+      "description": "Workspace client deliverable projects."
+    },
+    "/workspaces/{workspaceId}/allocations/{allocationId}": {
+      "schema": {
+        "$ref": "#/entities/AllocationRecord"
+      },
+      "description": "Annual person-project monthly percentage and status allocations."
+    },
+    "/workspaces/{workspaceId}/leaves/{leaveId}": {
+      "schema": {
+        "$ref": "#/entities/LeaveRecord"
+      },
+      "description": "Scheduled time off and leave entries for workspace team members."
+    }
+  }
+}

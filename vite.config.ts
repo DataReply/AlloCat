@@ -30,17 +30,17 @@ function githubPagesPlugin(): Plugin {
         );
         fs.writeFileSync(indexHtmlPath, builtHtml, 'utf-8');
 
-        // Create 404.html and .nojekyll in dist/
+        // Create 404.html and .nojekyll in dist/ and sync full bundle into docs/
+        const docsDir = path.resolve(rootDir, 'docs');
         fs.writeFileSync(path.join(distDir, '404.html'), builtHtml, 'utf-8');
         fs.writeFileSync(path.join(distDir, '.nojekyll'), '# Disable Jekyll\n', 'utf-8');
+        fs.mkdirSync(docsDir, { recursive: true });
+        fs.cpSync(distDir, docsDir, { recursive: true });
 
-        // Copy compiled assets into docs/assets/ and public/assets/
+        // Copy compiled assets into public/assets/ for root fallback compatibility
         const distAssetsDir = path.join(distDir, 'assets');
-        const docsAssetsDir = path.resolve(rootDir, 'docs', 'assets');
         const publicAssetsDir = path.resolve(rootDir, 'public', 'assets');
         if (fs.existsSync(distAssetsDir)) {
-          fs.mkdirSync(docsAssetsDir, { recursive: true });
-          fs.cpSync(distAssetsDir, docsAssetsDir, { recursive: true });
           fs.mkdirSync(publicAssetsDir, { recursive: true });
           fs.cpSync(distAssetsDir, publicAssetsDir, { recursive: true });
         }
