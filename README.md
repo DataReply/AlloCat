@@ -72,18 +72,19 @@ Open **Import / Export** from the **Admin Panel** (accessible via the **AlloCat 
 
 Before signing in, the workspace is locked behind a sign-in overlay.
 
-App sign-in uses local credentials (`admin` / `admin` on a fresh browser). Supabase anonymous Auth supplies an identity for Postgres and Realtime; Google sign-in is not used. For GitHub Pages, configure the Supabase project URL and public anon/publishable key once as GitHub Actions repository variables; local builds can use `.env.local` or per-browser Admin Panel settings. The app does not copy data between databases; import it yourself with the existing Import / Export tools. See [Supabase setup](./supabase/README.md) for instructions and the public-access warning.
+App sign-in uses browser-local username/password accounts (`admin` / `admin` on a fresh browser). Admins can create accounts and assign Admin, Editor, or Viewer roles in **Admin Panel → App Accounts**. Accounts and roles exist only in that browser and are not shared across devices. Viewer mode hides or blocks app editing in the UI, but these browser-stored roles are not security controls. Supabase anonymous Auth supplies an identity for Postgres and Realtime; Google sign-in is not used. For GitHub Pages, configure the Supabase project URL and public anon/publishable key once as GitHub Actions repository variables; local builds can use `.env.local` or per-browser Admin Panel settings. The app does not copy data between databases; import it yourself with the existing Import / Export tools. See [Supabase setup](./supabase/README.md) for instructions and the public-access warning.
 
-- **Sign-In:** Local browser login. The initial username and password are both `admin`.
+- **Sign-In:** Local browser login. The initial username and password are both `admin`; password hashes and account roles are stored in that browser's local storage.
 - **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
-  - **Open Admin Panel (`Manage All`)**: Centralized management modal with seven tabs and Quick Jump shortcuts:
+  - **Open Admin Panel (`Manage All`)**: Centralized management modal with account management for Admins and Quick Jump shortcuts:
     1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, and remove staff.
     2. **Departments**: Create departments, inline-rename existing departments (cascading updates to team members), and remove unused departments.
     3. **Clients**: Search client organizations, create clients with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients with cascading project cleanup.
     4. **Projects**: Search deliverable projects, inspect codes, parent clients, billing status (`Billable` vs. `Internal`), and assigned headcount, or add, edit, and delete projects.
     5. **Time Off & Leaves**: Browse all scheduled leaves, customize leave types and default impacts, schedule new time off, or remove leave entries.
     6. **Team & Collaboration**: View workspace sessions and collaboration settings. Email invitations are unavailable with local-only sign-in.
-    7. **Years & System**: Test the configured Supabase connection, manage planning years, open Import/Export tools, or reset the workspace. Database access is public under the configured policies.
+    7. **App Accounts** (Admin only): Create browser-local accounts, assign Admin/Editor/Viewer roles, reset passwords, or remove accounts. At least one Admin account is required.
+    8. **Years & System**: Test the configured Supabase connection, manage planning years, open Import/Export tools, or reset the workspace. Database access is public under the configured policies.
   - **Reporting & Analytics**: Jump straight to the Reporting & Capacity Analytics modal.
   - **Switch to Light / Dark Mode**: Toggle between Dark Mode (default) and balanced Light Mode.
   - **Windows & Offline App**: Open the desktop PWA installer and portable bundle generator.

@@ -5,6 +5,14 @@ export interface AuthUser {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  role: LocalAppRole;
+}
+
+export type LocalAppRole = 'admin' | 'editor' | 'viewer';
+
+export interface LocalAppAccount {
+  username: string;
+  role: LocalAppRole;
 }
 
 export interface SupabaseConfig {
@@ -12,14 +20,14 @@ export interface SupabaseConfig {
   anonKey: string;
 }
 
-interface LocalCredentials {
-  username: string;
+interface StoredLocalAccount extends LocalAppAccount {
   salt: string;
   passwordHash: string;
 }
 
 const SUPABASE_CONFIG_KEY = 'allocat_supabase_config_v1';
 const LOCAL_CREDENTIALS_KEY = 'allocat_local_credentials_v1';
+const LOCAL_ACCOUNTS_KEY = 'allocat_local_accounts_v1';
 const LOCAL_SESSION_KEY = 'allocat_local_session_v1';
 const LOCAL_UID_KEY = 'allocat_local_uid_v1';
 const LOCAL_AUTH_EVENT = 'allocat-local-auth-change';
@@ -161,30 +169,34 @@ export function requireSupabase(): SupabaseClient {
   return client;
 }
 
-function createLocalUser(username: string): AuthUser {
+function createLocalUser(username: string, role: LocalAppRole): AuthUser {
   let uid = localStorage.getItem(LOCAL_UID_KEY);
   if (!uid) {
     uid = crypto.randomUUID();
     localStorage.setItem(LOCAL_UID_KEY, uid);
   }
-  return { uid, email: null, displayName: username, photoURL: null };
+  return { uid, email: null, displayName: username, photoURL: null, role };
 }
 
-export function toAuthUser(user: SupabaseUser, username: string): AuthUser {
+export function toAuthUser(user: SupabaseUser, username: string, role: LocalAppRole): AuthUser {
   return {
     uid: user.id,
     email: null,
     displayName: username,
-    photoURL: null
+    photoURL: null,
+    role
   };
 }
 
-async function ensureAnonymousSupabaseUser(username: string): Promise<AuthUser> {
+async function ensureAnonymousSupabaseUser(
+  username: string,
+  role: LocalAppRole
+): Promise<AuthUser> {
   const client = requireSupabase();
   const { data: sessionData, error: sessionError } = await client.auth.getSession();
   if (sessionError) throw sessionError;
   if (sessionData.session?.user.is_anonymous) {
-    return toAuthUser(sessionData.session.user, username);
+    return toAuthUser(sessionData.session.user, username, role);
   }
   if (sessionData.session) {
     const { error } = await client.auth.signOut({ scope: 'local' });
@@ -195,7 +207,7 @@ async function ensureAnonymousSupabaseUser(username: string): Promise<AuthUser> 
   });
   if (error) throw error;
   if (!data.user) throw new Error('Supabase did not return an anonymous user.');
-  return toAuthUser(data.user, username);
+  return toAuthUser(data.user, username, role);
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -223,50 +235,216 @@ async function hashPassword(password: string, salt: string): Promise<string> {
   return bytesToHex(new Uint8Array(bits));
 }
 
-function readLocalCredentials(): LocalCredentials | null {
-  const raw = localStorage.getItem(LOCAL_CREDENTIALS_KEY);
-  if (!raw) return null;
+function isLocalRole(value: unknown): value is LocalAppRole {
+  return value === 'admin' || value === 'editor' || value === 'viewer';
+}
+
+function isStoredLocalAccount(value: unknown): value is StoredLocalAccount {
+  if (!value || typeof value !== 'object') return false;
+  const account = value as Partial<StoredLocalAccount>;
+  return (
+    typeof account.username === 'string' &&
+    typeof account.salt === 'string' &&
+    typeof account.passwordHash === 'string' &&
+    isLocalRole(account.role)
+  );
+}
+
+function parseLegacyLocalAccount(raw: string): StoredLocalAccount {
   const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Stored local login settings are invalid. Clear this browser’s site data to reset them.');
+  }
+  const legacy = parsed as { username?: unknown; salt?: unknown; passwordHash?: unknown };
   if (
-    !parsed ||
-    typeof parsed !== 'object' ||
-    typeof (parsed as LocalCredentials).username !== 'string' ||
-    typeof (parsed as LocalCredentials).salt !== 'string' ||
-    typeof (parsed as LocalCredentials).passwordHash !== 'string'
+    typeof legacy.username !== 'string' ||
+    typeof legacy.salt !== 'string' ||
+    typeof legacy.passwordHash !== 'string'
   ) {
     throw new Error('Stored local login settings are invalid. Clear this browser’s site data to reset them.');
   }
-  return parsed as LocalCredentials;
-}
-
-async function ensureLocalCredentials(): Promise<LocalCredentials> {
-  const saved = readLocalCredentials();
-  if (saved) return saved;
-
-  const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
-  const credentials: LocalCredentials = {
-    username: 'admin',
-    salt,
-    passwordHash: await hashPassword('admin', salt)
+  return {
+    username: legacy.username,
+    salt: legacy.salt,
+    passwordHash: legacy.passwordHash,
+    role: 'admin'
   };
-  localStorage.setItem(LOCAL_CREDENTIALS_KEY, JSON.stringify(credentials));
-  return credentials;
 }
 
-async function resolveLocalUser(username: string): Promise<AuthUser> {
+async function initializeLocalAccounts(): Promise<StoredLocalAccount[]> {
+  const saved = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+  if (saved) {
+    const parsed: unknown = JSON.parse(saved);
+    if (!Array.isArray(parsed) || !parsed.every(isStoredLocalAccount)) {
+      throw new Error('Stored app accounts are invalid. Clear this browser’s site data to reset them.');
+    }
+    return parsed;
+  }
+
+  const legacy = localStorage.getItem(LOCAL_CREDENTIALS_KEY);
+  const accounts: StoredLocalAccount[] = legacy
+    ? [parseLegacyLocalAccount(legacy)]
+    : [
+        {
+          username: 'admin',
+          salt: bytesToHex(crypto.getRandomValues(new Uint8Array(16))),
+          passwordHash: '',
+          role: 'admin' as const
+        }
+      ];
+  if (!legacy) {
+    const defaultAdmin = accounts[0];
+    if (!defaultAdmin) throw new Error('Could not initialize the default Admin account.');
+    defaultAdmin.passwordHash = await hashPassword('admin', defaultAdmin.salt);
+  }
+  localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+  localStorage.removeItem(LOCAL_CREDENTIALS_KEY);
+  return accounts;
+}
+
+function getAccount(
+  accounts: StoredLocalAccount[],
+  username: string
+): StoredLocalAccount | undefined {
+  return accounts.find((account) => account.username.toLowerCase() === username.toLowerCase());
+}
+
+function requireLocalAdmin(accounts: StoredLocalAccount[]): StoredLocalAccount {
+  const signedInUsername = localStorage.getItem(LOCAL_SESSION_KEY);
+  const signedInAccount = signedInUsername ? getAccount(accounts, signedInUsername) : undefined;
+  if (signedInAccount?.role !== 'admin') {
+    throw new Error('Only a local app admin can manage app accounts in this browser.');
+  }
+  return signedInAccount;
+}
+
+function validateNewAccount(username: string, password: string): string {
+  const normalizedUsername = username.trim();
+  if (!/^[a-zA-Z0-9._-]{3,32}$/.test(normalizedUsername)) {
+    throw new Error('Usernames must be 3–32 characters and use only letters, numbers, dots, underscores, or hyphens.');
+  }
+  if (password.length < 8) {
+    throw new Error('Passwords must be at least 8 characters long.');
+  }
+  return normalizedUsername;
+}
+
+function ensureAdminRemains(accounts: StoredLocalAccount[], changedAccount: StoredLocalAccount): void {
+  if (
+    changedAccount.role === 'admin' &&
+    accounts.filter((account) => account.role === 'admin').length <= 1
+  ) {
+    throw new Error('At least one Admin account must remain in this browser.');
+  }
+}
+
+export async function listLocalAppAccounts(): Promise<LocalAppAccount[]> {
+  const accounts = await initializeLocalAccounts();
+  requireLocalAdmin(accounts);
+  return accounts.map(({ username, role }) => ({ username, role }));
+}
+
+export async function createLocalAppAccount(
+  username: string,
+  password: string,
+  role: LocalAppRole
+): Promise<LocalAppAccount[]> {
+  const accounts = await initializeLocalAccounts();
+  requireLocalAdmin(accounts);
+  const normalizedUsername = validateNewAccount(username, password);
+  if (getAccount(accounts, normalizedUsername)) {
+    throw new Error('An account with that username already exists.');
+  }
+  if (!isLocalRole(role)) throw new Error('Select a valid app role.');
+  const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+  accounts.push({
+    username: normalizedUsername,
+    salt,
+    passwordHash: await hashPassword(password, salt),
+    role
+  });
+  localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+  return accounts.map(({ username: accountName, role: accountRole }) => ({
+    username: accountName,
+    role: accountRole
+  }));
+}
+
+export async function updateLocalAppAccount(
+  username: string,
+  changes: { role?: LocalAppRole; password?: string }
+): Promise<LocalAppAccount[]> {
+  const accounts = await initializeLocalAccounts();
+  requireLocalAdmin(accounts);
+  const account = getAccount(accounts, username);
+  if (!account) throw new Error('The selected app account no longer exists.');
+  if (changes.role !== undefined) {
+    if (!isLocalRole(changes.role)) throw new Error('Select a valid app role.');
+    if (account.role === 'admin' && changes.role !== 'admin') {
+      ensureAdminRemains(accounts, account);
+    }
+    account.role = changes.role;
+  }
+  if (changes.password !== undefined) {
+    if (changes.password.length < 8) {
+      throw new Error('Passwords must be at least 8 characters long.');
+    }
+    account.salt = bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+    account.passwordHash = await hashPassword(changes.password, account.salt);
+  }
+  localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+  if (
+    changes.role !== undefined &&
+    localStorage.getItem(LOCAL_SESSION_KEY)?.toLowerCase() === account.username.toLowerCase()
+  ) {
+    window.dispatchEvent(new Event(LOCAL_AUTH_EVENT));
+  }
+  return accounts.map(({ username: accountName, role }) => ({ username: accountName, role }));
+}
+
+export async function deleteLocalAppAccount(username: string): Promise<LocalAppAccount[]> {
+  const accounts = await initializeLocalAccounts();
+  requireLocalAdmin(accounts);
+  const account = getAccount(accounts, username);
+  if (!account) throw new Error('The selected app account no longer exists.');
+  if (account.role === 'admin') ensureAdminRemains(accounts, account);
+  const remainingAccounts = accounts.filter(
+    (candidate) => candidate.username.toLowerCase() !== account.username.toLowerCase()
+  );
+  localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(remainingAccounts));
+  if (localStorage.getItem(LOCAL_SESSION_KEY)?.toLowerCase() === account.username.toLowerCase()) {
+    signOutUser();
+  }
+  return remainingAccounts.map(({ username: accountName, role }) => ({
+    username: accountName,
+    role
+  }));
+}
+
+async function resolveLocalUser(username: string, role: LocalAppRole): Promise<AuthUser> {
   if (isSupabaseConfigured()) {
     try {
-      return await ensureAnonymousSupabaseUser(username);
+      return await ensureAnonymousSupabaseUser(username, role);
     } catch {
-      return createLocalUser(username);
+      return createLocalUser(username, role);
     }
   }
-  return createLocalUser(username);
+  return createLocalUser(username, role);
 }
 
 export async function restoreLocalAuth(): Promise<AuthUser | null> {
   const username = localStorage.getItem(LOCAL_SESSION_KEY);
-  return username ? resolveLocalUser(username) : null;
+  if (!username) {
+    await initializeLocalAccounts();
+    return null;
+  }
+  const accounts = await initializeLocalAccounts();
+  const account = getAccount(accounts, username);
+  if (!account) {
+    localStorage.removeItem(LOCAL_SESSION_KEY);
+    return null;
+  }
+  return resolveLocalUser(account.username, account.role);
 }
 
 export async function signInWithLocalCredentials(
@@ -277,17 +455,14 @@ export async function signInWithLocalCredentials(
   if (!normalizedUsername || !password) {
     throw new Error('Enter your username and password.');
   }
-  const credentials = await ensureLocalCredentials();
-  const candidateHash = await hashPassword(password, credentials.salt);
-  if (
-    normalizedUsername.toLowerCase() !== credentials.username.toLowerCase() ||
-    candidateHash !== credentials.passwordHash
-  ) {
+  const accounts = await initializeLocalAccounts();
+  const account = getAccount(accounts, normalizedUsername);
+  if (!account || (await hashPassword(password, account.salt)) !== account.passwordHash) {
     throw new Error('The username or password is incorrect.');
   }
 
-  localStorage.setItem(LOCAL_SESSION_KEY, credentials.username);
-  const user = await resolveLocalUser(credentials.username);
+  localStorage.setItem(LOCAL_SESSION_KEY, account.username);
+  const user = await resolveLocalUser(account.username, account.role);
   window.dispatchEvent(new Event(LOCAL_AUTH_EVENT));
   return user;
 }

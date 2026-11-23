@@ -34,6 +34,9 @@ export const LoginOverlay: React.FC = () => {
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
             Resource & Capacity Planner
           </p>
+          <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+            App accounts are managed by an Admin and exist only in this browser.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
