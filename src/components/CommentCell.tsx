@@ -18,7 +18,7 @@ export const CommentCell: React.FC<CommentCellProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     setDraft(value);
@@ -56,8 +56,8 @@ export const CommentCell: React.FC<CommentCellProps> = ({
     setIsEditing(false);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSave();
     } else if (e.key === 'Escape') {
@@ -72,15 +72,15 @@ export const CommentCell: React.FC<CommentCellProps> = ({
         className="flex items-center gap-1.5 w-full min-w-0 px-1 py-0.5"
         onClick={(e) => e.stopPropagation()}
       >
-        <input
+        <textarea
           ref={inputRef}
-          type="text"
+          rows={2}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={handleKeyDown}
           onBlur={handleSave}
           placeholder={placeholder}
-          className="w-full text-[11px] py-1 px-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded border border-blue-500 shadow-2xs focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-sans"
+          className="flex-1 min-w-0 resize-y text-[11px] py-1 px-2 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded border border-blue-500 shadow-2xs focus:outline-hidden focus:ring-1 focus:ring-blue-500 font-sans"
         />
         <button
           type="button"
@@ -120,7 +120,7 @@ export const CommentCell: React.FC<CommentCellProps> = ({
     >
       <div className="min-w-0 flex-1">
         {hasComment ? (
-          <span className="text-[11px] text-slate-700 dark:text-slate-300 truncate block leading-relaxed font-sans">
+          <span className="text-[11px] text-slate-700 dark:text-slate-300 block whitespace-pre-wrap break-words leading-relaxed font-sans">
             {value}
           </span>
         ) : (
