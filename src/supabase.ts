@@ -36,9 +36,17 @@ function getEnvironmentConfig(): SupabaseConfig {
   };
 }
 
+export function isSupabaseConfigLocked(): boolean {
+  const config = getEnvironmentConfig();
+  return Boolean(config.url && config.anonKey);
+}
+
 export function getSupabaseConfig(): SupabaseConfig {
+  const environmentConfig = getEnvironmentConfig();
+  if (environmentConfig.url && environmentConfig.anonKey) return environmentConfig;
+
   const saved = localStorage.getItem(SUPABASE_CONFIG_KEY);
-  if (!saved) return getEnvironmentConfig();
+  if (!saved) return environmentConfig;
   const parsed: unknown = JSON.parse(saved);
   if (
     !parsed ||
@@ -99,6 +107,9 @@ function isPrivilegedSupabaseKey(key: string): boolean {
 }
 
 export function configureSupabase(config: SupabaseConfig): void {
+  if (isSupabaseConfigLocked()) {
+    throw new Error('Supabase settings are managed by this deployment and cannot be changed in Admin Panel.');
+  }
   const url = config.url.trim();
   const anonKey = config.anonKey.trim();
   if ((url && !anonKey) || (!url && anonKey)) {

@@ -6,15 +6,18 @@ The app uses local username/password sign-in and Supabase Postgres/Realtime. Goo
 
 1. Create a Supabase project and run [`migrations/20261123000000_initial_schema.sql`](./migrations/20261123000000_initial_schema.sql) in the Supabase SQL Editor.
 2. Enable **Anonymous Sign-Ins** under **Authentication → Providers**. The app creates an anonymous Supabase identity after the local login so Realtime and database requests have a Supabase user ID. No Google provider or OAuth redirect configuration is needed.
-3. In the app, sign in with the local browser credentials and open **Admin Panel → Years & System**.
-4. Enter the Supabase **Project URL** and **anon/publishable key**, save them, and select **Test Connection**. The settings are stored in that browser's local storage; enter them separately in other browsers.
-5. Import workspace data yourself using **Admin Panel → Import / Export**.
+3. For GitHub Pages, add these repository-level Actions variables under **Settings → Secrets and variables → Actions → Variables**:
+   - `VITE_SUPABASE_URL`: the Supabase project URL.
+   - `VITE_SUPABASE_ANON_KEY`: the public anon/publishable key.
+4. Run or rerun the Pages deployment workflow. The values are embedded in the public frontend build, so every user shares this configuration and does not need to enter credentials. In Admin Panel, the values are read-only and can be tested with **Test Connection**.
+5. For a local build, copy `.env.example` to `.env.local` and set those same two `VITE_` variables, or configure them through **Admin Panel → Years & System**. Local Admin Panel settings are stored in that browser's local storage.
+6. Import workspace data yourself using **Admin Panel → Import / Export**.
 
 ## Security warning
 
 The initial schema grants public read/write access to the workspace tables. The local `admin` / `admin` login is only a browser-side app gate; it does not secure the Supabase database. Anyone who can access the deployed app and its public key can read and modify database contents. Use this setup only if that exposure is acceptable.
 
-Only enter the project's public anon/publishable key in the app. **Never use a service-role or secret key** in browser settings, source code, environment variables prefixed with `VITE_`, or GitHub Pages.
+Only use the project's public anon/publishable key in the app. **Never use a service-role or secret key** in browser settings, source code, environment variables prefixed with `VITE_`, or GitHub Pages. GitHub Actions variables are appropriate for the public key and URL because both are included in the frontend bundle.
 
 ## Local checks
 
