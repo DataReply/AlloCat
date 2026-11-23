@@ -45,6 +45,7 @@ import {
 } from '../types';
 import { formatPersonTableName } from '../utils/allocationMath';
 import { ExportScope } from '../utils/importExportUtils';
+import { testFirestoreConnection } from '../firebase';
 import {
   WorkspaceMember,
   WorkspaceRole,
@@ -249,6 +250,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [teamError, setTeamError] = useState<string | null>(null);
   const [copiedInvite, setCopiedInvite] = useState<'link' | 'code' | null>(null);
   const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
+  const [connectionTestStatus, setConnectionTestStatus] = useState<
+    'idle' | 'testing' | 'success' | 'error'
+  >('idle');
+  const [connectionTestMessage, setConnectionTestMessage] = useState<string | null>(null);
 
   // Filter lists
   const filteredPeople = useMemo(() => {
@@ -1600,6 +1605,62 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Workspace changes sync automatically in real time with all collaborators. If you previously saved data locally in this browser, you can push it to the shared cloud workspace.
                       </p>
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+                        <div>
+                          <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            External Database Connection Test
+                          </h4>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Verify authenticated access to the configured Firebase Cloud Firestore database. This performs a server read and does not write data.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={connectionTestStatus === 'testing'}
+                          onClick={async () => {
+                            setConnectionTestStatus('testing');
+                            setConnectionTestMessage(null);
+                            const startedAt = performance.now();
+                            try {
+                              await testFirestoreConnection();
+                              setConnectionTestStatus('success');
+                              setConnectionTestMessage(
+                                `Connection successful (${Math.round(performance.now() - startedAt)} ms).`
+                              );
+                            } catch (error) {
+                              setConnectionTestStatus('error');
+                              setConnectionTestMessage(
+                                error instanceof Error ? error.message : String(error)
+                              );
+                            }
+                          }}
+                          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+                        >
+                          <RefreshCw
+                            className={`w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 ${
+                              connectionTestStatus === 'testing' ? 'animate-spin' : ''
+                            }`}
+                          />
+                          <span>
+                            {connectionTestStatus === 'testing'
+                              ? 'Testing Connection...'
+                              : 'Test Connection'}
+                          </span>
+                        </button>
+                        {connectionTestMessage && (
+                          <p
+                            role="status"
+                            aria-live="polite"
+                            className={`text-[11px] break-words ${
+                              connectionTestStatus === 'success'
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : 'text-rose-700 dark:text-rose-400'
+                            }`}
+                          >
+                            {connectionTestMessage}
+                          </p>
+                        )}
+                      </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
