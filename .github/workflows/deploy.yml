@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - master
+      - dev
     paths-ignore:
       - 'docs/assets/**'
       - '.nojekyll'
@@ -27,7 +28,7 @@ jobs:
   build-and-prepare:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository (Pure Git — Zero Node 20 Actions)
+      - name: Checkout repository
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -37,12 +38,17 @@ jobs:
           git fetch --depth=1 origin "${GITHUB_REF_NAME}"
           git checkout -B "${GITHUB_REF_NAME}" FETCH_HEAD
 
-      - name: Verify Node.js & Build Production Bundle
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify runtime and build production bundle
         run: |
           node -v
-          npm -v
-          npm install --no-audit --no-fund
-          npm run build
+          bun --version
+          bun install --frozen-lockfile --no-progress
+          bun run build
           mkdir -p docs
           cp -r dist/* docs/
           touch docs/.nojekyll .nojekyll
