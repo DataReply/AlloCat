@@ -71,19 +71,25 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
 }) => {
   const getPerson = (id: string) => people.find((p) => p.id === id);
   const visibleMonthCount = visibleMonths.filter(Boolean).length;
+  const assignedProjectIds = new Set(
+    allocations
+      .filter((allocation) => allocation.year === selectedYear)
+      .map((allocation) => allocation.projectId)
+  );
+  const assignedProjects = projects.filter((project) => assignedProjectIds.has(project.id));
 
-  if (projects.length === 0) {
+  if (assignedProjects.length === 0) {
     return (
       <div className="p-12 text-center text-slate-500 dark:text-slate-400 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-800 m-6">
-        <p className="font-medium text-sm">No clients or projects match the selected filters.</p>
-        <p className="text-xs mt-1">Try clearing search terms or selecting another client filter.</p>
+        <p className="font-medium text-sm">No projects with assigned team members match the selected filters.</p>
+        <p className="text-xs mt-1">Try clearing search terms, selecting another client, or choosing a different year.</p>
       </div>
     );
   }
 
   const clientGroups = clients
     .map((client) => {
-      const clientProjects = projects.filter((p) => p.clientId === client.id);
+      const clientProjects = assignedProjects.filter((p) => p.clientId === client.id);
       return {
         client,
         projects: clientProjects
