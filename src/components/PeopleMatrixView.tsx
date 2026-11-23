@@ -588,9 +588,9 @@ export const PeopleMatrixView: React.FC<PeopleMatrixViewProps> = ({
                                         );
                                       }}
                                       title={`Status: ${statusCfg.label} — Click to change to ${ALLOCATION_STATUS_CONFIG[nextStatus].label}`}
-                                      className="inline-flex items-center gap-1 px-1 py-0.2 rounded text-[8px] font-sans font-medium bg-white/80 dark:bg-black/35 text-slate-800 dark:text-white/95 hover:bg-white dark:hover:bg-black/55 border border-black/10 dark:border-white/20 cursor-pointer transition-colors"
+                                      className="inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[13px] leading-none font-sans font-medium whitespace-nowrap bg-white/80 dark:bg-black/35 text-slate-800 dark:text-white/95 hover:bg-white dark:hover:bg-black/55 border border-black/10 dark:border-white/20 cursor-pointer transition-colors"
                                     >
-                                      <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dotClass}`} />
+                                      <span className={`w-2.5 h-2.5 rounded-full ${statusCfg.dotClass}`} />
                                       <span>{statusCfg.shortLabel}</span>
                                     </button>
                                   ) : (
