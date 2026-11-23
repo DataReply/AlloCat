@@ -48,6 +48,7 @@ import { ExportScope } from '../utils/importExportUtils';
 import {
   configureSupabase,
   getSupabaseConfig,
+  isSupabaseConfigLocked,
   isSupabaseConfigured,
   testSupabaseConnection
 } from '../supabase';
@@ -1626,7 +1627,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </h3>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Enter your project URL and public anon/publishable key. These settings are stored in this browser and used for database sync.
+                        {isSupabaseConfigLocked()
+                          ? 'Supabase is configured for this deployment and shared with every user.'
+                          : 'Enter your project URL and public anon/publishable key. These settings are stored in this browser and used for database sync.'}
                       </p>
                       <label className="block space-y-1">
                         <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
@@ -1638,6 +1641,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           onChange={(event) => setSupabaseUrl(event.target.value)}
                           placeholder="https://your-project.supabase.co"
                           autoComplete="url"
+                          readOnly={isSupabaseConfigLocked()}
                           className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                         />
                       </label>
@@ -1651,6 +1655,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           onChange={(event) => setSupabaseAnonKey(event.target.value)}
                           placeholder="sb_publishable_... or anon key"
                           autoComplete="off"
+                          readOnly={isSupabaseConfigLocked()}
                           className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                         />
                       </label>
@@ -1663,11 +1668,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
+                          disabled={isSupabaseConfigLocked()}
                           onClick={handleSaveSupabaseSettings}
-                          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg transition-colors cursor-pointer"
                         >
                           <KeyRound className="w-3.5 h-3.5" />
-                          <span>Save Settings</span>
+                          <span>{isSupabaseConfigLocked() ? 'Managed by Deployment' : 'Save Settings'}</span>
                         </button>
                         <button
                           type="button"

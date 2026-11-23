@@ -44,6 +44,9 @@ jobs:
           bun-version: latest
 
       - name: Verify runtime and build production bundle
+        env:
+          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
         run: |
           node -v
           bun --version
