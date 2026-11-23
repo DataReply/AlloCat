@@ -8,7 +8,15 @@ if (
   typeof window !== 'undefined' &&
   (window.location.protocol === 'https:' || window.location.protocol === 'http:')
 ) {
-  registerSW({ immediate: true });
+  if (import.meta.env.DEV && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      for (const reg of regs) {
+        void reg.unregister();
+      }
+    }).catch(() => {});
+  } else {
+    registerSW({ immediate: true });
+  }
 }
 
 createRoot(document.getElementById('root')!).render(

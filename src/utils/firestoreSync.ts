@@ -532,7 +532,12 @@ export async function checkOrJoinWorkspace(
       // Check if local browser SQLite has prior data to migrate on initial cloud setup
       let initialSeed: AppState = getDefaultAppState();
       try {
-        const sqliteBoot = await initSQLiteWorkspace();
+        const sqliteBoot = await Promise.race([
+          initSQLiteWorkspace(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('SQLite bootstrap timeout')), 3000)
+          )
+        ]);
         const localHasAnyData =
           sqliteBoot.state.people.length > 0 ||
           sqliteBoot.state.clients.length > 0 ||
@@ -941,7 +946,8 @@ export async function submitJoinRequest(
 
 export function subscribeToMemberAccess(
   uid: string,
-  onGranted: () => void
+  onGranted: () => void,
+  onError?: (err: Error) => void
 ): Unsubscribe {
   const memberPath = `workspaces/${DEFAULT_WORKSPACE_ID}/members/${uid}`;
   return onSnapshot(
@@ -952,7 +958,11 @@ export function subscribeToMemberAccess(
       }
     },
     (error) => {
-      handleFirestoreError(error, OperationType.GET, memberPath);
+      try {
+        handleFirestoreError(error, OperationType.GET, memberPath);
+      } catch (e) {
+        onError?.(e instanceof Error ? e : new Error(String(e)));
+      }
     }
   );
 }

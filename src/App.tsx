@@ -65,6 +65,7 @@ import {
   checkOrJoinWorkspace,
   createWorkspaceEmailInvite,
   deleteWorkspaceEmailInvite,
+  isBootstrappedAdminEmail,
   rejectJoinRequest,
   removeCollaborator,
   rotateWorkspaceJoinCode,
@@ -74,6 +75,20 @@ import {
   syncWorkspaceDeltaToFirestore,
   updateCollaboratorRole
 } from './utils/firestoreSync';
+
+function formatFirebaseError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err || 'Unknown cloud error');
+  try {
+    const parsed = JSON.parse(raw) as { error?: string; path?: string; operationType?: string };
+    if (parsed && typeof parsed === 'object' && parsed.error) {
+      const target = parsed.path ? ` (${parsed.operationType || 'access'} ${parsed.path})` : '';
+      return `${parsed.error}${target}`;
+    }
+  } catch {
+    // Plain string error
+  }
+  return raw;
+}
 
 export function App() {
   const isOnline = useOnlineStatus();
@@ -92,6 +107,7 @@ export function App() {
   const [adminCollabState, setAdminCollabState] = useState<AdminCollabState | null>(null);
   const [isWorkspaceHydrated, setIsWorkspaceHydrated] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [workspaceSyncError, setWorkspaceSyncError] = useState<string | null>(null);
   const [initialInviteCode] = useState<string>(() => {
     try {
       return new URLSearchParams(window.location.search).get('invite') || '';
@@ -102,7 +118,7 @@ export function App() {
   const [accessCheckNonce, setAccessCheckNonce] = useState(0);
 
   const isCloudReadyRef = useRef(false);
-  const isApplyingRemoteRef = useRef(false);
+  const remoteHydratedStatesRef = useRef(new WeakSet<AppState>());
   const lastCloudStateRef = useRef<AppState>(appState);
   const pendingWritesCountRef = useRef(0);
   const syncQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -205,6 +221,8 @@ export function App() {
       setAuthReady(true);
       if (!user) {
         isCloudReadyRef.current = false;
+        pendingWritesCountRef.current = 0;
+        syncQueueRef.current = Promise.resolve();
         setIsWorkspaceHydrated(false);
         setAccessStatus('checking');
         setCurrentMember(null);
@@ -212,6 +230,8 @@ export function App() {
         setAdminCollabState(null);
         setExistingJoinRequest(null);
         setAccessDeniedReason(null);
+        setWorkspaceSyncError(null);
+        setSyncStatus('synced');
       }
     });
     return () => unsub();
@@ -249,9 +269,7 @@ export function App() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setAccessDeniedReason(
-          err instanceof Error ? err.message : 'Unable to verify workspace access.'
-        );
+        setAccessDeniedReason(formatFirebaseError(err));
         setAccessStatus('needs_access');
       });
 
@@ -263,9 +281,15 @@ export function App() {
   // Auto-unlock while waiting for admin approval
   useEffect(() => {
     if (!firebaseUser || accessStatus !== 'needs_access') return;
-    return subscribeToMemberAccess(firebaseUser.uid, () => {
-      setAccessCheckNonce((n) => n + 1);
-    });
+    return subscribeToMemberAccess(
+      firebaseUser.uid,
+      () => {
+        setAccessCheckNonce((n) => n + 1);
+      },
+      (err) => {
+        console.warn('Member access listener error:', err);
+      }
+    );
   }, [firebaseUser, accessStatus]);
 
   // Subscribe to real-time collaborative Firestore workspace once granted access
@@ -273,13 +297,13 @@ export function App() {
     if (!firebaseUser || accessStatus !== 'granted') return;
 
     let firstHydration = true;
+    setWorkspaceSyncError(null);
     const unsub = subscribeToWorkspaceData({
       onStateHydrated: (cloudState) => {
-        lastCloudStateRef.current = cloudState;
         if (pendingWritesCountRef.current > 0) {
           return;
         }
-        isApplyingRemoteRef.current = true;
+        lastCloudStateRef.current = cloudState;
         const preferredYear = selectedYearRef.current;
         const mergedSelectedYear = cloudState.availableYears.includes(preferredYear)
           ? preferredYear
@@ -288,7 +312,10 @@ export function App() {
           ...cloudState,
           selectedYear: mergedSelectedYear
         };
+        remoteHydratedStatesRef.current.add(nextHydrated);
         setAppState(nextHydrated);
+        setWorkspaceSyncError(null);
+        setSyncStatus('synced');
         if (firstHydration) {
           firstHydration = false;
           setExpandedProjectIds(new Set(nextHydrated.projects.map((p) => p.id)));
@@ -308,8 +335,9 @@ export function App() {
           );
         }
       },
-      onSyncError: () => {
+      onSyncError: (err) => {
         setSyncStatus('error');
+        setWorkspaceSyncError(formatFirebaseError(err));
       }
     });
 
@@ -317,7 +345,7 @@ export function App() {
       unsub();
       isCloudReadyRef.current = false;
     };
-  }, [firebaseUser, accessStatus]);
+  }, [firebaseUser, accessStatus, accessCheckNonce]);
 
   // Subscribe to admin collaboration metadata when user is an admin
   useEffect(() => {
@@ -338,8 +366,7 @@ export function App() {
   // Push local workspace mutations to Firestore via queued delta sync
   useEffect(() => {
     if (!isCloudReadyRef.current || !firebaseUser || accessStatus !== 'granted') return;
-    if (isApplyingRemoteRef.current) {
-      isApplyingRemoteRef.current = false;
+    if (remoteHydratedStatesRef.current.has(appState)) {
       return;
     }
 
@@ -356,6 +383,7 @@ export function App() {
           firebaseUser
         );
         lastCloudStateRef.current = syncedState;
+        setWorkspaceSyncError(null);
         if (isSqliteMirrorReadyRef.current) {
           syncAppStateToSQLite(syncedState);
         }
@@ -363,6 +391,7 @@ export function App() {
       .catch((err) => {
         console.error('Firestore delta sync failed:', err);
         setSyncStatus('error');
+        setWorkspaceSyncError(formatFirebaseError(err));
       })
       .finally(() => {
         pendingWritesCountRef.current = Math.max(0, pendingWritesCountRef.current - 1);
@@ -1220,10 +1249,56 @@ export function App() {
     };
   }, [activeCellEditor, people, projects, allocations, selectedYear]);
 
-  if (!authReady || (firebaseUser && accessStatus === 'checking') || (firebaseUser && accessStatus === 'granted' && !isWorkspaceHydrated)) {
+  const isBootstrappedAdmin = Boolean(
+    firebaseUser?.email && isBootstrappedAdminEmail(firebaseUser.email)
+  );
+
+  if (
+    !authReady ||
+    (firebaseUser && accessStatus === 'checking') ||
+    (firebaseUser && accessStatus === 'granted' && !isWorkspaceHydrated)
+  ) {
     return (
-      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-200 text-xs font-mono">
-        Connecting to shared AlloCat cloud workspace...
+      <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-200 p-4">
+        <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900/90 p-6 shadow-2xl space-y-4">
+          {workspaceSyncError ? (
+            <>
+              <div className="space-y-1.5">
+                <div className="text-sm font-bold text-rose-400">
+                  Cloud Workspace Connection Issue
+                </div>
+                <p className="text-xs text-slate-300 leading-relaxed break-words">
+                  {workspaceSyncError}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWorkspaceSyncError(null);
+                    setSyncStatus('syncing');
+                    setAccessCheckNonce((n) => n + 1);
+                  }}
+                  className="flex-1 py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Retry Connection
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void signOutUser()}
+                  className="py-2 px-3 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center gap-3 text-xs font-mono text-slate-300">
+              <span className="h-4 w-4 rounded-full border-2 border-indigo-400 border-t-transparent animate-spin" />
+              <span>Connecting to shared AlloCat cloud workspace...</span>
+            </div>
+          )}
+        </div>
       </div>
     );
   }
@@ -1237,6 +1312,7 @@ export function App() {
       {!isAuthenticatedWorkspace && (
         <LoginOverlay
           firebaseUser={firebaseUser}
+          isBootstrappedAdmin={isBootstrappedAdmin}
           accessDeniedReason={accessDeniedReason}
           existingRequest={existingJoinRequest}
           initialInviteCode={initialInviteCode}
@@ -1249,6 +1325,34 @@ export function App() {
           !isAuthenticatedWorkspace ? 'blur-md pointer-events-none select-none' : ''
         }`}
       >
+        {isAuthenticatedWorkspace && syncStatus === 'error' && workspaceSyncError && (
+          <div className="bg-rose-600 text-white px-4 py-1.5 text-xs flex items-center justify-between gap-3 shrink-0">
+            <span className="truncate font-medium">
+              Cloud sync issue: {workspaceSyncError}
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setWorkspaceSyncError(null);
+                  setSyncStatus('syncing');
+                  setAccessCheckNonce((n) => n + 1);
+                }}
+                className="px-2 py-0.5 rounded bg-white/20 hover:bg-white/30 font-semibold cursor-pointer"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspaceSyncError(null)}
+                aria-label="Dismiss sync error"
+                className="px-1.5 py-0.5 rounded hover:bg-white/20 font-bold cursor-pointer"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         <Header
           viewMode={viewMode}
           onViewModeChange={setViewMode}

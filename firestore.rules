@@ -41,7 +41,9 @@ service cloud.firestore {
     }
 
     function isBootstrappedAdmin() {
-      return isEmailVerified() && request.auth.token.email == 'ictismylife@gmail.com';
+      return isEmailVerified() &&
+        'email' in request.auth.token &&
+        request.auth.token.email.lower() == 'ictismylife@gmail.com';
     }
 
     function isAdmin() {
@@ -403,6 +405,7 @@ service cloud.firestore {
               incoming().joinedVia == 'invite' &&
               'inviteId' in incoming() &&
               isValidId(incoming().inviteId) &&
+              'email' in request.auth.token &&
               exists(/databases/$(database)/documents/workspaces/$(workspaceId)/invites/$(incoming().inviteId)) &&
               get(/databases/$(database)/documents/workspaces/$(workspaceId)/invites/$(incoming().inviteId)).data.email == request.auth.token.email.lower() &&
               incoming().role == get(/databases/$(database)/documents/workspaces/$(workspaceId)/invites/$(incoming().inviteId)).data.role
@@ -441,6 +444,7 @@ service cloud.firestore {
             isWorkspaceAdmin(workspaceId) ||
             (
               isOwner(userId) &&
+              'email' in request.auth.token &&
               incoming().email == request.auth.token.email.lower() &&
               existsAfter(/databases/$(database)/documents/workspaces/$(workspaceId)/members/$(userId))
             )
@@ -489,9 +493,9 @@ service cloud.firestore {
       // -----------------------------------------------------------------------
       match /invites/{inviteId} {
         allow get: if isValidId(workspaceId) && isValidId(inviteId) && isEmailVerified() &&
-          (isWorkspaceAdmin(workspaceId) || existing().email == request.auth.token.email.lower());
+          (isWorkspaceAdmin(workspaceId) || ('email' in request.auth.token && existing().email == request.auth.token.email.lower()));
         allow list: if isValidId(workspaceId) && isEmailVerified() &&
-          (isWorkspaceAdmin(workspaceId) || existing().email == request.auth.token.email.lower());
+          (isWorkspaceAdmin(workspaceId) || ('email' in request.auth.token && existing().email == request.auth.token.email.lower()));
 
         allow create: if isValidId(workspaceId) && isValidId(inviteId) && isEmailVerified() &&
           isValidWorkspaceInvite(incoming(), inviteId) &&
@@ -510,7 +514,7 @@ service cloud.firestore {
           incoming().diff(existing()).affectedKeys().hasOnly(['role', 'email', 'updatedAt']);
 
         allow delete: if isValidId(workspaceId) && isValidId(inviteId) && isEmailVerified() &&
-          (isWorkspaceAdmin(workspaceId) || existing().email == request.auth.token.email.lower());
+          (isWorkspaceAdmin(workspaceId) || ('email' in request.auth.token && existing().email == request.auth.token.email.lower()));
       }
 
       // -----------------------------------------------------------------------
@@ -525,6 +529,7 @@ service cloud.firestore {
           isOwner(requestUid) &&
           isValidJoinRequest(incoming(), requestUid) &&
           incoming().status == 'pending' &&
+          'email' in request.auth.token &&
           incoming().email == request.auth.token.email.lower() &&
           incoming().createdAt == request.time &&
           incoming().updatedAt == request.time;
