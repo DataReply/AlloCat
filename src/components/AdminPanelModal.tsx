@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Eraser,
   UserPlus,
+  UserCog,
   Copy,
   RefreshCw,
   Mail,
@@ -52,6 +53,8 @@ import {
   isSupabaseConfigured,
   testSupabaseConnection
 } from '../supabase';
+import type { LocalAppRole } from '../supabase';
+import { LocalAccountsPanel } from './LocalAccountsPanel';
 import {
   WorkspaceMember,
   WorkspaceRole,
@@ -65,6 +68,7 @@ export type AdminTab =
   | 'projects'
   | 'leaves'
   | 'team'
+  | 'accounts'
   | 'workspace';
 
 export type ClearableDataArea =
@@ -121,7 +125,9 @@ interface AdminPanelModalProps {
   onClearWorkspaceData?: (areas: ClearableDataArea[]) => void;
   // Team & Collaboration props
   currentUserUid?: string;
-  userRole?: WorkspaceRole;
+  userRole?: WorkspaceRole | 'viewer';
+  localUserRole?: LocalAppRole;
+  currentLocalUsername?: string;
   members?: WorkspaceMember[];
   adminCollabState?: AdminCollabState | null;
   onRotateJoinCode?: () => Promise<void>;
@@ -182,6 +188,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onClearWorkspaceData,
   currentUserUid,
   userRole = 'editor',
+  localUserRole = 'editor',
+  currentLocalUsername = '',
   members = [],
   adminCollabState = null,
   onRotateJoinCode,
@@ -196,12 +204,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setActiveTab(initialTab);
+      setActiveTab(
+        (initialTab === 'accounts' || initialTab === 'workspace') && localUserRole !== 'admin'
+          ? 'people'
+          : initialTab
+      );
       setSearchQuery('');
       setConfirmClear(false);
       setClearFeedback(null);
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, localUserRole]);
 
   // Department tab states
   const [newDeptName, setNewDeptName] = useState('');
@@ -473,7 +485,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       count: members.length + (adminCollabState?.joinRequests.length || 0),
       icon: UserPlus
     },
-    { id: 'workspace', label: 'Years & System', icon: ShieldCheck }
+    ...(localUserRole === 'admin'
+      ? [
+          { id: 'accounts' as const, label: 'App Accounts', icon: UserCog },
+          { id: 'workspace' as const, label: 'Years & System', icon: ShieldCheck }
+        ]
+      : [])
   ];
 
   return (
@@ -1544,7 +1561,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               )}
 
               {/* TAB 6: WORKSPACE & YEARS */}
-              {activeTab === 'workspace' && (
+              {activeTab === 'workspace' && localUserRole === 'admin' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {/* Planning Years Card */}
                   <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-4">
@@ -2111,6 +2128,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       </div>
                     );
                   })()}
+
                 </div>
               )}
 
@@ -2444,6 +2462,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   </div>
                 );
               })()}
+
+              {activeTab === 'accounts' && localUserRole === 'admin' && (
+                <LocalAccountsPanel currentUsername={currentLocalUsername} />
+              )}
             </div>
           </div>
         </div>

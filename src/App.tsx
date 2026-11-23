@@ -355,7 +355,7 @@ export function App() {
     if (
       !currentUser ||
       accessStatus !== 'granted' ||
-      currentMember?.role !== 'admin' ||
+      currentUser.role !== 'admin' ||
       !isSupabaseConfigured()
     ) {
       setAdminCollabState(null);
@@ -369,11 +369,16 @@ export function App() {
         console.warn('Admin collaboration listener error:', err);
       }
     );
-  }, [currentUser, accessStatus, currentMember?.role]);
+  }, [currentUser, accessStatus]);
 
   // Push local workspace mutations to Supabase via queued delta sync.
   useEffect(() => {
-    if (!isCloudReadyRef.current || !currentUser || accessStatus !== 'granted') return;
+    if (
+      !isCloudReadyRef.current ||
+      !currentUser ||
+      currentUser.role === 'viewer' ||
+      accessStatus !== 'granted'
+    ) return;
     if (remoteHydratedStatesRef.current.has(appState)) {
       return;
     }
@@ -1309,7 +1314,8 @@ export function App() {
 
   const isAuthenticatedWorkspace = Boolean(currentUser);
   const currentUserLabel =
-    currentMember?.displayName || currentUser?.displayName || currentUser?.email || null;
+    currentUser?.displayName || currentMember?.displayName || currentUser?.email || null;
+  const currentRole = currentUser?.role || currentMember?.role || 'editor';
 
   return (
     <div className="h-screen overflow-hidden flex flex-col bg-slate-200/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative">
@@ -1373,12 +1379,14 @@ export function App() {
           isDarkMode={isDarkMode}
           onToggleDarkMode={() => setIsDarkMode((d) => !d)}
           currentUser={currentUserLabel}
-          userRole={currentMember?.role || 'editor'}
+          userRole={currentRole}
           syncStatus={syncStatus}
           collaboratorCount={Math.max(1, workspaceMembers.length)}
           pendingRequestsCount={adminCollabState?.joinRequests.length || 0}
-          onOpenAdminPanel={(tab = 'people') =>
-            setAdminPanelState({ isOpen: true, tab })
+          onOpenAdminPanel={
+            currentRole === 'viewer'
+              ? undefined
+              : (tab = 'people') => setAdminPanelState({ isOpen: true, tab })
           }
           onOpenReportingModal={(tab = 'departments') =>
             setReportingModalState({ isOpen: true, tab })
@@ -1396,13 +1404,28 @@ export function App() {
         departments={departments}
         clients={sortedClients}
         onOpenManageDepartmentsModal={() => setIsManageDepartmentsOpen(true)}
+        readOnly={currentRole === 'viewer'}
         kpis={kpis}
         isAllExpanded={isAllExpanded}
         onToggleExpandAll={handleToggleExpandAll}
         selectedYear={selectedYear}
       />
 
-      <main className="flex-1 min-h-0 max-w-[1720px] w-full mx-auto flex flex-col overflow-hidden">
+      <main
+        className="flex-1 min-h-0 max-w-[1720px] w-full mx-auto flex flex-col overflow-hidden"
+        aria-disabled={currentRole === 'viewer'}
+        onClickCapture={(event) => {
+          if (currentRole === 'viewer') {
+            event.stopPropagation();
+          }
+        }}
+        onKeyDownCapture={(event) => {
+          if (currentRole === 'viewer' && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         {viewMode === 'clients' && (
           <ClientProjectMatrixView
             clients={sortedClients}
@@ -1547,7 +1570,7 @@ export function App() {
       </div>
 
       {/* Cell Allocation & Total Workload Breakdown Popover */}
-      {activeEditorData && (
+      {currentRole !== 'viewer' && activeEditorData && (
         <CellAllocationPopover
           isOpen={true}
           onClose={() => setActiveCellEditor(null)}
@@ -1576,7 +1599,7 @@ export function App() {
         />
       )}
 
-      <BatchAssignModal
+      {currentRole !== 'viewer' && <BatchAssignModal
         isOpen={assignModalState.isOpen}
         onClose={() => setAssignModalState({ isOpen: false })}
         people={people}
@@ -1587,10 +1610,10 @@ export function App() {
         defaultProjectId={assignModalState.projectId}
         defaultMonthIndex={assignModalState.monthIndex}
         onAssign={handleBatchAssign}
-      />
+      />}
 
       <AdminPanelModal
-        isOpen={adminPanelState.isOpen}
+        isOpen={adminPanelState.isOpen && currentRole !== 'viewer'}
         initialTab={adminPanelState.tab}
         onClose={() => setAdminPanelState((prev) => ({ ...prev, isOpen: false }))}
         people={people}
@@ -1650,7 +1673,9 @@ export function App() {
         }}
         onClearWorkspaceData={handleClearWorkspaceData}
         currentUserUid={currentUser?.uid}
-        userRole={currentMember?.role || 'editor'}
+        userRole={currentRole}
+        localUserRole={currentUser?.role || 'editor'}
+        currentLocalUsername={currentUser?.displayName || ''}
         members={workspaceMembers}
         adminCollabState={adminCollabState}
         onRotateJoinCode={
@@ -1683,7 +1708,7 @@ export function App() {
         onSelectYear={(yr) => setAppState((prev) => ({ ...prev, selectedYear: yr }))}
       />
 
-      <AddPersonModal
+      {currentRole !== 'viewer' && <AddPersonModal
         isOpen={isAddPersonOpen}
         onClose={() => {
           setIsAddPersonOpen(false);
@@ -1693,9 +1718,9 @@ export function App() {
         personToEdit={personToEdit}
         onSavePerson={handleAddPerson}
         onUpdatePerson={handleUpdatePerson}
-      />
+      />}
 
-      <AddClientProjectModal
+      {currentRole !== 'viewer' && <AddClientProjectModal
         isOpen={isAddProjectOpen}
         onClose={() => {
           setIsAddProjectOpen(false);
@@ -1709,9 +1734,9 @@ export function App() {
         onUpdateProject={handleUpdateProject}
         onUpdateClient={handleUpdateClient}
         onDeleteProject={handleDeleteProject}
-      />
+      />}
 
-      <AddLeaveModal
+      {currentRole !== 'viewer' && <AddLeaveModal
         isOpen={leaveModalState.isOpen}
         onClose={() => setLeaveModalState({ isOpen: false })}
         people={people}
@@ -1720,9 +1745,9 @@ export function App() {
         defaultMonthIndex={leaveModalState.monthIndex}
         leaveTypes={leaveTypes}
         onSaveLeave={handleSaveLeave}
-      />
+      />}
 
-      <OvertimeAlertsDrawer
+      {currentRole !== 'viewer' && <OvertimeAlertsDrawer
         isOpen={isOvertimeDrawerOpen}
         onClose={() => setIsOvertimeDrawerOpen(false)}
         people={people}
@@ -1732,9 +1757,9 @@ export function App() {
         leaves={leaves}
         selectedYear={selectedYear}
         onUpdateAllocationMonth={handleUpdateAllocationMonth}
-      />
+      />}
 
-      <ManageYearsModal
+      {currentRole !== 'viewer' && <ManageYearsModal
         isOpen={isManageYearsOpen}
         onClose={() => setIsManageYearsOpen(false)}
         years={availableYears}
@@ -1742,9 +1767,9 @@ export function App() {
         onAddYear={handleAddYear}
         onRemoveYear={handleRemoveYear}
         onSelectYear={(yr) => setAppState((prev) => ({ ...prev, selectedYear: yr }))}
-      />
+      />}
 
-      <ManageDepartmentsModal
+      {currentRole !== 'viewer' && <ManageDepartmentsModal
         isOpen={isManageDepartmentsOpen}
         onClose={() => setIsManageDepartmentsOpen(false)}
         departments={departments}
@@ -1752,15 +1777,15 @@ export function App() {
         onRenameDepartment={handleRenameDepartment}
         onAddDepartment={handleAddDepartment}
         onDeleteDepartment={handleDeleteDepartment}
-      />
+      />}
 
-      <ConfirmDeletePersonModal
+      {currentRole !== 'viewer' && <ConfirmDeletePersonModal
         person={personToDelete}
         onClose={() => setPersonToDelete(null)}
         onConfirmDelete={handleDeletePerson}
-      />
+      />}
 
-      <ExportImportModal
+      {currentRole !== 'viewer' && <ExportImportModal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
         appState={appState}
@@ -1775,7 +1800,7 @@ export function App() {
           setIsExportModalOpen(false);
           setIsStandaloneModalOpen(true);
         }}
-      />
+      />}
 
       <StandaloneAppModal
         isOpen={isStandaloneModalOpen}

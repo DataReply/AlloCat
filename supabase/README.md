@@ -1,6 +1,6 @@
 # Supabase setup
 
-The app uses local username/password sign-in and Supabase Postgres/Realtime. Google sign-in and automatic data migration are not used. Existing data must be imported manually through the app's Import / Export tools.
+The app uses browser-local username/password accounts and Supabase Postgres/Realtime. Google sign-in and automatic data migration are not used. Existing data must be imported manually through the app's Import / Export tools. An Admin can create local Admin, Editor, and Viewer accounts in **Admin Panel → App Accounts**; those accounts are stored only in the current browser.
 
 ## Configure a Supabase project
 
@@ -15,7 +15,7 @@ The app uses local username/password sign-in and Supabase Postgres/Realtime. Goo
 
 ## Security warning
 
-The initial schema grants public read/write access to the workspace tables. The local `admin` / `admin` login is only a browser-side app gate; it does not secure the Supabase database. Anyone who can access the deployed app and its public key can read and modify database contents. Use this setup only if that exposure is acceptable.
+The initial schema grants public read/write access to the workspace tables. Local app accounts and roles are only a browser-side UI gate; they do not secure the Supabase database and are not shared across devices. Anyone who can access the deployed app and its public key can read and modify database contents, regardless of the app role. Use this setup only if that exposure is acceptable.
 
 Only use the project's public anon/publishable key in the app. **Never use a service-role or secret key** in browser settings, source code, environment variables prefixed with `VITE_`, or GitHub Pages. GitHub Actions variables are appropriate for the public key and URL because both are included in the frontend bundle.
 

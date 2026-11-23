@@ -33,6 +33,7 @@ interface ToolbarProps {
   departments: string[];
   clients?: Client[];
   onOpenManageDepartmentsModal: () => void;
+  readOnly?: boolean;
   kpis: {
     totalPeople: number;
     activeProjectsCount: number;
@@ -54,6 +55,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   departments,
   clients = [],
   onOpenManageDepartmentsModal,
+  readOnly = false,
   kpis,
   isAllExpanded,
   onToggleExpandAll
@@ -493,24 +495,28 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                       {dept}
                     </option>
                   ))}
-                  <option
-                    value="__manage_depts__"
-                    className="bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-medium"
-                  >
-                    + Manage Departments...
-                  </option>
+                  {!readOnly && (
+                    <option
+                      value="__manage_depts__"
+                      className="bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 font-medium"
+                    >
+                      + Manage Departments...
+                    </option>
+                  )}
                 </select>
                 <ChevronDown className="w-3 h-3 text-slate-500 dark:text-slate-400 absolute right-2 pointer-events-none" />
               </div>
 
-              <button
-                type="button"
-                onClick={onOpenManageDepartmentsModal}
-                className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-300/60 dark:hover:bg-slate-700/60 rounded transition-colors cursor-pointer"
-                title="Modify, rename, or add departments"
-              >
-                <Settings className="w-3.5 h-3.5" />
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={onOpenManageDepartmentsModal}
+                  className="p-1 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-300/60 dark:hover:bg-slate-700/60 rounded transition-colors cursor-pointer"
+                  title="Modify, rename, or add departments"
+                >
+                  <Settings className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           )}
 
