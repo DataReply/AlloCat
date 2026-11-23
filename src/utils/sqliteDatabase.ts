@@ -22,11 +22,6 @@ import {
 } from '../data/seedData';
 import { ImportMergeMode } from './importExportUtils';
 
-export interface SQLiteAuthCredentials {
-  username: string;
-  password: string;
-}
-
 export interface SQLiteTableStat {
   tableName: string;
   rowCount: number;
@@ -67,7 +62,6 @@ const SQLITE_B64_KEY = 'allocat_sqlite_b64_v1';
 const SQLITE_IDB_PENDING_KEY = 'allocat_sqlite_idb_pending_v1';
 const LEGACY_STATE_KEY = 'allocat_app_state_v1';
 const LEGACY_V2_KEY = 'staffgrid_app_state_v2';
-const LEGACY_AUTH_KEY = 'allocat_auth_credentials_v1';
 const SQL_WASM_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.12.0/';
 
 export const SQLITE_RELATIONAL_SCHEMA_DDL = `PRAGMA foreign_keys = ON;
@@ -75,13 +69,6 @@ export const SQLITE_RELATIONAL_SCHEMA_DDL = `PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS workspace_meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS auth_users (
-  username TEXT PRIMARY KEY,
-  password TEXT NOT NULL,
-  role TEXT NOT NULL DEFAULT 'admin',
   updated_at TEXT NOT NULL
 );
 
@@ -427,34 +414,11 @@ function readAndNormalizeLegacyState(): { state: AppState; migratedFrom?: string
   return { state: getDefaultAppState() };
 }
 
-function readLegacyAuthCredentials(): SQLiteAuthCredentials {
-  try {
-    const raw = localStorage.getItem(LEGACY_AUTH_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (
-        typeof parsed?.username === 'string' &&
-        parsed.username.trim().length > 0 &&
-        typeof parsed?.password === 'string' &&
-        parsed.password.length > 0
-      ) {
-        return {
-          username: parsed.username.trim(),
-          password: parsed.password
-        };
-      }
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return { username: 'admin', password: 'admin' };
-}
-
 function cleanupLegacyLocalStorageKeys(): void {
   try {
     localStorage.removeItem(LEGACY_STATE_KEY);
     localStorage.removeItem(LEGACY_V2_KEY);
-    localStorage.removeItem(LEGACY_AUTH_KEY);
+    localStorage.removeItem('allocat_auth_credentials_v1');
   } catch {
     // Ignore storage cleanup errors
   }
@@ -486,6 +450,7 @@ const DB_STATUS_COLUMNS = [
 
 function ensureSchema(db: SqlJsDatabase): void {
   db.run(SQLITE_RELATIONAL_SCHEMA_DDL);
+  db.run('DROP TABLE IF EXISTS auth_users;');
 
   const allocCols = new Set(
     queryRows(db, 'PRAGMA table_info(allocations);').map((r) => String(r.name || ''))
@@ -536,32 +501,6 @@ function normalizeMonthsArray(raw: unknown[]): number[] {
     out[i] = Number.isFinite(val) ? Math.max(0, Math.round(val)) : 0;
   }
   return out;
-}
-
-function writeAuthUserIntoDb(db: SqlJsDatabase, creds: SQLiteAuthCredentials): void {
-  const now = new Date().toISOString();
-  db.run('BEGIN TRANSACTION;');
-  try {
-    db.run('DELETE FROM auth_users;');
-    db.run(
-      'INSERT INTO auth_users (username, password, role, updated_at) VALUES (?, ?, ?, ?);',
-      [creds.username.trim() || 'admin', creds.password || 'admin', 'admin', now]
-    );
-    db.run('COMMIT;');
-  } catch (err) {
-    db.run('ROLLBACK;');
-    throw err;
-  }
-}
-
-function readAuthUserFromDb(db: SqlJsDatabase): SQLiteAuthCredentials | null {
-  if (!tableExists(db, 'auth_users')) return null;
-  const rows = queryRows(db, 'SELECT username, password FROM auth_users LIMIT 1;');
-  if (rows.length === 0) return null;
-  const username = String(rows[0].username || '').trim();
-  const password = String(rows[0].password || '');
-  if (!username || !password) return null;
-  return { username, password };
 }
 
 function writeStateIntoDb(
@@ -1020,7 +959,6 @@ function buildStatsFromState(state: AppState, db?: SqlJsDatabase | null): SQLite
         rowCount: countTable('planning_years', state.availableYears.length),
         role: 'config'
       },
-      { tableName: 'auth_users', rowCount: countTable('auth_users', 1), role: 'config' },
       { tableName: 'workspace_meta', rowCount: countTable('workspace_meta', 2), role: 'config' }
     ]
   };
@@ -1060,10 +998,8 @@ async function persistActiveDb(db: SqlJsDatabase): Promise<void> {
 
 export async function initSQLiteWorkspace(): Promise<{
   state: AppState;
-  authCredentials: SQLiteAuthCredentials;
   stats: SQLiteDatabaseStats;
 }> {
-  const legacyAuth = readLegacyAuthCredentials();
   const { state: legacyOrDefaultState, migratedFrom } = readAndNormalizeLegacyState();
 
   try {
@@ -1096,19 +1032,12 @@ export async function initSQLiteWorkspace(): Promise<{
     if (existingBytes && isSQLiteBinaryHeader(existingBytes)) {
       try {
         const db = new SQL.Database(existingBytes);
+        const hadLegacyAuthTable = tableExists(db, 'auth_users');
         ensureSchema(db);
         const hydrated = readAppStateFromDb(db);
         const hasWorkspaceMeta =
           tableExists(db, 'workspace_meta') &&
           queryRows(db, 'SELECT key FROM workspace_meta LIMIT 1;').length > 0;
-        let authCreds = readAuthUserFromDb(db);
-
-        if (!authCreds) {
-          authCreds = legacyAuth;
-          writeAuthUserIntoDb(db, authCreds);
-          await persistActiveDb(db);
-        }
-
         if (
           hydrated &&
           (hasWorkspaceMeta ||
@@ -1117,13 +1046,16 @@ export async function initSQLiteWorkspace(): Promise<{
           activeDb = db;
           lastByteSize = existingBytes.byteLength;
           storageBackend = idbBytes && !isIdbPending ? 'indexeddb+localstorage' : 'localstorage';
-          if ((embeddedBytes && !idbBytes) || (isIdbPending && lsBytes && !embeddedBytes)) {
+          if (
+            hadLegacyAuthTable ||
+            (embeddedBytes && !idbBytes) ||
+            (isIdbPending && lsBytes && !embeddedBytes)
+          ) {
             await persistActiveDb(db);
           }
           cleanupLegacyLocalStorageKeys();
           return {
             state: hydrated,
-            authCredentials: authCreds,
             stats: buildStatsFromState(hydrated, db)
           };
         }
@@ -1136,20 +1068,17 @@ export async function initSQLiteWorkspace(): Promise<{
     // 2. Fresh database creation (migrating any legacy localStorage JSON into SQLite tables)
     const freshDb = new SQL.Database();
     writeStateIntoDb(freshDb, legacyOrDefaultState, migratedFrom);
-    writeAuthUserIntoDb(freshDb, legacyAuth);
     activeDb = freshDb;
     await persistActiveDb(freshDb);
     cleanupLegacyLocalStorageKeys();
 
     return {
       state: legacyOrDefaultState,
-      authCredentials: legacyAuth,
       stats: buildStatsFromState(legacyOrDefaultState, freshDb)
     };
   } catch {
     return {
       state: legacyOrDefaultState,
-      authCredentials: legacyAuth,
       stats: buildStatsFromState(legacyOrDefaultState, null)
     };
   }
@@ -1168,23 +1097,6 @@ export async function syncAppStateToSQLite(state: AppState): Promise<SQLiteDatab
       return buildStatsFromState(state, activeDb);
     } catch {
       return buildStatsFromState(state, activeDb);
-    }
-  });
-}
-
-export async function saveAuthCredentialsToSQLite(creds: SQLiteAuthCredentials): Promise<void> {
-  return enqueueSqliteOp(async () => {
-    try {
-      const SQL = await getSqlJs();
-      if (!activeDb) {
-        activeDb = new SQL.Database();
-        ensureSchema(activeDb);
-      }
-      writeAuthUserIntoDb(activeDb, creds);
-      await persistActiveDb(activeDb);
-      cleanupLegacyLocalStorageKeys();
-    } catch {
-      // Ignore errors if WASM unavailable
     }
   });
 }
@@ -1233,7 +1145,7 @@ export function exportSQLDumpScript(state: AppState): string {
 
   lines.push('-- ============================================================');
   lines.push(`-- AlloCat SQLite Relational Database Dump (${exportedAt})`);
-  lines.push('-- Engine: SQLite 3 (Normalized 10-Table Schema + Views)');
+  lines.push('-- Engine: SQLite 3 (Normalized Workspace Schema + Views)');
   lines.push('-- ============================================================');
   lines.push('');
   lines.push('PRAGMA foreign_keys = OFF;');
@@ -1618,4 +1530,3 @@ export async function buildStandalonePortableHtml(state: AppState): Promise<stri
 </body>
 </html>`;
 }
-

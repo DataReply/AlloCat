@@ -48,8 +48,7 @@ import {
 import { ReportingModal, ReportTab } from './components/ReportingModal';
 import { StandaloneAppModal } from './components/StandaloneAppModal';
 import { useOnlineStatus } from './utils/usePWAInstall';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, signOutUser } from './firebase';
+import { signOutUser, supabase, toAuthUser, type AuthUser } from './supabase';
 import { LoginOverlay } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
 import {
@@ -72,11 +71,11 @@ import {
   subscribeToAdminCollabState,
   subscribeToMemberAccess,
   subscribeToWorkspaceData,
-  syncWorkspaceDeltaToFirestore,
+  syncWorkspaceDeltaToSupabase,
   updateCollaboratorRole
-} from './utils/firestoreSync';
+} from './utils/supabaseSync';
 
-function formatFirebaseError(err: unknown): string {
+function formatCloudError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Unknown cloud error');
   try {
     const parsed = JSON.parse(raw) as { error?: string; path?: string; operationType?: string };
@@ -94,7 +93,7 @@ export function App() {
   const isOnline = useOnlineStatus();
   const [appState, setAppState] = useState<AppState>(() => getDefaultAppState());
   const [authReady, setAuthReady] = useState(false);
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
   const [accessStatus, setAccessStatus] = useState<'checking' | 'needs_access' | 'granted'>(
     'checking'
   );
@@ -214,10 +213,17 @@ export function App() {
     };
   }, []);
 
-  // Listen to Firebase Auth state
+  // Listen to Supabase Auth state
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+    const {
+      data: { subscription }
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ? toAuthUser(session.user) : null;
+      setCurrentUser(user);
       setAuthReady(true);
       if (!user) {
         isCloudReadyRef.current = false;
@@ -234,17 +240,17 @@ export function App() {
         setSyncStatus('synced');
       }
     });
-    return () => unsub();
+    return () => subscription.unsubscribe();
   }, []);
 
   // Verify or initialize workspace membership whenever authenticated user changes
   useEffect(() => {
-    if (!firebaseUser) return;
+    if (!currentUser) return;
     let cancelled = false;
     setAccessStatus('checking');
     setAccessDeniedReason(null);
 
-    checkOrJoinWorkspace(firebaseUser, initialInviteCode)
+    checkOrJoinWorkspace(currentUser, initialInviteCode)
       .then((res) => {
         if (cancelled) return;
         if (res.status === 'granted') {
@@ -269,20 +275,20 @@ export function App() {
       })
       .catch((err) => {
         if (cancelled) return;
-        setAccessDeniedReason(formatFirebaseError(err));
+        setAccessDeniedReason(formatCloudError(err));
         setAccessStatus('needs_access');
       });
 
     return () => {
       cancelled = true;
     };
-  }, [firebaseUser, initialInviteCode, accessCheckNonce]);
+  }, [currentUser, initialInviteCode, accessCheckNonce]);
 
   // Auto-unlock while waiting for admin approval
   useEffect(() => {
-    if (!firebaseUser || accessStatus !== 'needs_access') return;
+    if (!currentUser || accessStatus !== 'needs_access') return;
     return subscribeToMemberAccess(
-      firebaseUser.uid,
+      currentUser.uid,
       () => {
         setAccessCheckNonce((n) => n + 1);
       },
@@ -290,11 +296,11 @@ export function App() {
         console.warn('Member access listener error:', err);
       }
     );
-  }, [firebaseUser, accessStatus]);
+  }, [currentUser, accessStatus]);
 
-  // Subscribe to real-time collaborative Firestore workspace once granted access
+  // Subscribe to the real-time collaborative Supabase workspace once access is granted.
   useEffect(() => {
-    if (!firebaseUser || accessStatus !== 'granted') return;
+    if (!currentUser || accessStatus !== 'granted') return;
 
     let firstHydration = true;
     setWorkspaceSyncError(null);
@@ -328,7 +334,7 @@ export function App() {
       },
       onMembersUpdate: (members) => {
         setWorkspaceMembers(members);
-        const me = members.find((m) => m.uid === firebaseUser.uid);
+        const me = members.find((m) => m.uid === currentUser.uid);
         if (me) {
           setCurrentMember((prev) =>
             prev ? { ...prev, role: me.role, displayName: me.displayName } : me
@@ -337,7 +343,7 @@ export function App() {
       },
       onSyncError: (err) => {
         setSyncStatus('error');
-        setWorkspaceSyncError(formatFirebaseError(err));
+        setWorkspaceSyncError(formatCloudError(err));
       }
     });
 
@@ -345,11 +351,11 @@ export function App() {
       unsub();
       isCloudReadyRef.current = false;
     };
-  }, [firebaseUser, accessStatus, accessCheckNonce]);
+  }, [currentUser, accessStatus, accessCheckNonce]);
 
   // Subscribe to admin collaboration metadata when user is an admin
   useEffect(() => {
-    if (!firebaseUser || accessStatus !== 'granted' || currentMember?.role !== 'admin') {
+    if (!currentUser || accessStatus !== 'granted' || currentMember?.role !== 'admin') {
       setAdminCollabState(null);
       return;
     }
@@ -361,11 +367,11 @@ export function App() {
         console.warn('Admin collaboration listener error:', err);
       }
     );
-  }, [firebaseUser, accessStatus, currentMember?.role]);
+  }, [currentUser, accessStatus, currentMember?.role]);
 
-  // Push local workspace mutations to Firestore via queued delta sync
+  // Push local workspace mutations to Supabase via queued delta sync.
   useEffect(() => {
-    if (!isCloudReadyRef.current || !firebaseUser || accessStatus !== 'granted') return;
+    if (!isCloudReadyRef.current || !currentUser || accessStatus !== 'granted') return;
     if (remoteHydratedStatesRef.current.has(appState)) {
       return;
     }
@@ -377,10 +383,10 @@ export function App() {
     syncQueueRef.current = syncQueueRef.current
       .then(async () => {
         const prevSnapshot = lastCloudStateRef.current;
-        const syncedState = await syncWorkspaceDeltaToFirestore(
+        const syncedState = await syncWorkspaceDeltaToSupabase(
           prevSnapshot,
           nextSnapshot,
-          firebaseUser
+          currentUser
         );
         lastCloudStateRef.current = syncedState;
         setWorkspaceSyncError(null);
@@ -389,9 +395,9 @@ export function App() {
         }
       })
       .catch((err) => {
-        console.error('Firestore delta sync failed:', err);
+        console.error('Supabase delta sync failed:', err);
         setSyncStatus('error');
-        setWorkspaceSyncError(formatFirebaseError(err));
+        setWorkspaceSyncError(formatCloudError(err));
       })
       .finally(() => {
         pendingWritesCountRef.current = Math.max(0, pendingWritesCountRef.current - 1);
@@ -399,7 +405,7 @@ export function App() {
           setSyncStatus((prev) => (prev === 'error' ? 'error' : 'synced'));
         }
       });
-  }, [appState, firebaseUser, accessStatus]);
+  }, [appState, currentUser, accessStatus]);
 
   // Toggle dark mode class on root html element
   useEffect(() => {
@@ -1250,13 +1256,13 @@ export function App() {
   }, [activeCellEditor, people, projects, allocations, selectedYear]);
 
   const isBootstrappedAdmin = Boolean(
-    firebaseUser?.email && isBootstrappedAdminEmail(firebaseUser.email)
+    currentUser?.email && isBootstrappedAdminEmail(currentUser.email)
   );
 
   if (
     !authReady ||
-    (firebaseUser && accessStatus === 'checking') ||
-    (firebaseUser && accessStatus === 'granted' && !isWorkspaceHydrated)
+    (currentUser && accessStatus === 'checking') ||
+    (currentUser && accessStatus === 'granted' && !isWorkspaceHydrated)
   ) {
     return (
       <div className="h-screen flex items-center justify-center bg-slate-950 text-slate-200 p-4">
@@ -1303,15 +1309,15 @@ export function App() {
     );
   }
 
-  const isAuthenticatedWorkspace = Boolean(firebaseUser && accessStatus === 'granted');
+  const isAuthenticatedWorkspace = Boolean(currentUser && accessStatus === 'granted');
   const currentUserLabel =
-    currentMember?.displayName || firebaseUser?.displayName || firebaseUser?.email || null;
+    currentMember?.displayName || currentUser?.displayName || currentUser?.email || null;
 
   return (
     <div className="h-screen overflow-hidden flex flex-col bg-slate-200/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative">
       {!isAuthenticatedWorkspace && (
         <LoginOverlay
-          firebaseUser={firebaseUser}
+          user={currentUser}
           isBootstrappedAdmin={isBootstrappedAdmin}
           accessDeniedReason={accessDeniedReason}
           existingRequest={existingJoinRequest}
@@ -1652,21 +1658,21 @@ export function App() {
           setAppState(fresh);
         }}
         onClearWorkspaceData={handleClearWorkspaceData}
-        currentUserUid={firebaseUser?.uid}
+        currentUserUid={currentUser?.uid}
         userRole={currentMember?.role || 'editor'}
         members={workspaceMembers}
         adminCollabState={adminCollabState}
         onRotateJoinCode={
-          firebaseUser
+          currentUser
             ? async () => {
-                await rotateWorkspaceJoinCode(firebaseUser, adminCollabState?.joinCodes || []);
+                await rotateWorkspaceJoinCode(currentUser, adminCollabState?.joinCodes || []);
               }
             : undefined
         }
         onCreateEmailInvite={
-          firebaseUser
+          currentUser
             ? async (email: string, role: WorkspaceRole) => {
-                await createWorkspaceEmailInvite(firebaseUser, email, role);
+                await createWorkspaceEmailInvite(currentUser, email, role);
               }
             : undefined
         }

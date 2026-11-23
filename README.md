@@ -1,18 +1,18 @@
 # AlloCat — Resource & Capacity Planner
 
-**AlloCat** is an interactive annual resource allocation and capacity planning application designed for engineering, product, design, and delivery teams. It provides a unified 12-month matrix workspace backed by an in-browser relational **SQLite WebAssembly (`sql.js`)** database to plan team staffing across clients and deliverable projects, track time off and leaves, identify available bench capacity, analyze utilization & billable ratios, and prevent overtime conflicts in real time.
+**AlloCat** is an interactive annual resource allocation and capacity planning application designed for engineering, product, design, and delivery teams. It provides a unified 12-month matrix workspace backed by Supabase Auth and Postgres, with a local in-browser relational **SQLite WebAssembly (`sql.js`)** mirror for browser persistence and import/export.
 
 ---
 
 ## Relational SQLite Storage Architecture
 
-All workspace data and administrator credentials run locally in the browser on an in-memory **SQLite 3** engine compiled to WebAssembly (`sql.js`) with foreign-key enforcement (`PRAGMA foreign_keys = ON`) and automatic binary persistence:
+The local workspace mirror runs in an in-memory **SQLite 3** engine compiled to WebAssembly (`sql.js`), with foreign-key enforcement (`PRAGMA foreign_keys = ON`) and automatic binary persistence:
 
 - **Primary Persistence**: Binary `.sqlite` database stored in browser **IndexedDB** (`allocat_sqlite_idb`), mirrored to a base64 backup in `localStorage` (`allocat_sqlite_b64_v1`), with automatic one-time migration from legacy `localStorage` payloads.
-- **Normalized Relational Schema (10 Tables + 2 Analytical Views)**:
+- **Normalized Relational Schema (9 Tables + 2 Analytical Views)**:
   - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
   - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `jan_status`–`dec_status`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
-  - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `auth_users`, `workspace_meta`
+  - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `workspace_meta`. Authentication credentials are managed by Supabase Auth and are not stored in the local SQLite database.
   - **Analytical SQL Views**: `v_allocation_months` (monthly percentages + statuses), `v_person_annual_summary`
 
 ---
@@ -72,8 +72,9 @@ Open **Import / Export** from the **Admin Panel** (accessible via the **AlloCat 
 
 Before signing in, the workspace is locked behind a sign-in overlay.
 
-- **Default Login:** `admin`
-- **Default Password:** `admin`
+Shared authentication and cloud workspace data use Supabase Auth, Postgres, and Realtime. Configure the browser's `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, enable Google OAuth in Supabase, and add GitHub Pages redirect URLs. See [Supabase setup and Firebase migration](./supabase/README.md) for deployment configuration and the non-destructive live data migration procedure.
+
+- **Sign-In:** Continue with Google through the configured Supabase Auth project. The bootstrapped workspace owner is `ictismylife@gmail.com`.
 - **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
   - **Open Admin Panel (`Manage All`)**: Centralized management modal with six tabs and Quick Jump shortcuts:
     1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, and remove staff.
@@ -81,11 +82,10 @@ Before signing in, the workspace is locked behind a sign-in overlay.
     3. **Clients**: Search client organizations, create clients with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients with cascading project cleanup.
     4. **Projects**: Search deliverable projects, inspect codes, parent clients, billing status (`Billable` vs. `Internal`), and assigned headcount, or add, edit, and delete projects.
     5. **Time Off & Leaves**: Browse all scheduled leaves, customize leave types and default impacts, schedule new time off, or remove leave entries.
-    6. **Years & System**: Add/switch/remove planning years, change administrator login credentials, open Import/Export tools, or reset the workspace to default seed data.
+    6. **Years & System**: Add/switch/remove planning years, test the Supabase connection, open Import/Export tools, or reset the workspace to default seed data.
   - **Reporting & Analytics**: Jump straight to the Reporting & Capacity Analytics modal.
   - **Switch to Light / Dark Mode**: Toggle between Dark Mode (default) and balanced Light Mode.
   - **Windows & Offline App**: Open the desktop PWA installer and portable bundle generator.
-  - **Change Login & Password**: Verify your current password and update credentials stored in SQLite `auth_users`.
   - **Log Out / Lock Workspace**: Lock and blur the workspace until signed in again.
 
 ---

@@ -12,16 +12,15 @@ import {
   Cloud,
   RefreshCw
 } from 'lucide-react';
-import type { User } from 'firebase/auth';
-import { signInWithGoogle, signOutUser } from '../firebase';
+import { signInWithGoogle, signOutUser, isSupabaseConfigured, type AuthUser } from '../supabase';
 import {
   WorkspaceJoinRequest,
   joinWorkspaceWithCode,
   submitJoinRequest
-} from '../utils/firestoreSync';
+} from '../utils/supabaseSync';
 
 interface LoginOverlayProps {
-  firebaseUser: User | null;
+  user: AuthUser | null;
   isBootstrappedAdmin?: boolean;
   accessDeniedReason?: string | null;
   existingRequest?: WorkspaceJoinRequest | null;
@@ -30,7 +29,7 @@ interface LoginOverlayProps {
 }
 
 export const LoginOverlay: React.FC<LoginOverlayProps> = ({
-  firebaseUser,
+  user,
   isBootstrappedAdmin = false,
   accessDeniedReason,
   existingRequest,
@@ -39,7 +38,6 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
 }) => {
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
-  const [unauthorizedHost, setUnauthorizedHost] = useState<string | null>(null);
 
   const [inviteCode, setInviteCode] = useState(initialInviteCode);
   const [isJoiningByCode, setIsJoiningByCode] = useState(false);
@@ -56,30 +54,12 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
 
   const handleGoogleSignIn = async () => {
     setAuthError(null);
-    setUnauthorizedHost(null);
     setIsSigningIn(true);
     try {
       await signInWithGoogle();
     } catch (err: unknown) {
-      const code =
-        typeof err === 'object' && err !== null && 'code' in err
-          ? String((err as { code?: string }).code)
-          : '';
       const message = err instanceof Error ? err.message : String(err);
-
-      if (code === 'auth/unauthorized-domain' || message.includes('unauthorized-domain')) {
-        const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
-        setUnauthorizedHost(host);
-        setAuthError(
-          `Domain "${host}" is not yet authorized for Google Sign-In in Firebase Authentication.`
-        );
-      } else if (code === 'auth/popup-blocked') {
-        setAuthError('Sign-in popup was blocked by your browser. Please allow popups and try again.');
-      } else if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
-        setAuthError('Sign-in popup was closed before completing.');
-      } else {
-        setAuthError(message || 'Unable to sign in with Google.');
-      }
+      setAuthError(message || 'Unable to sign in with Google.');
     } finally {
       setIsSigningIn(false);
     }
@@ -87,11 +67,11 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
 
   const handleJoinWithCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firebaseUser || !inviteCode.trim()) return;
+    if (!user || !inviteCode.trim()) return;
     setCodeError(null);
     setIsJoiningByCode(true);
     try {
-      await joinWorkspaceWithCode(firebaseUser, inviteCode.trim());
+      await joinWorkspaceWithCode(user, inviteCode.trim());
       onAccessGranted();
     } catch (err) {
       setCodeError(
@@ -104,11 +84,11 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
 
   const handleSendJoinRequest = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!firebaseUser) return;
+    if (!user) return;
     setRequestError(null);
     setIsSubmittingRequest(true);
     try {
-      const req = await submitJoinRequest(firebaseUser, requestNote);
+      const req = await submitJoinRequest(user, requestNote);
       setSubmittedRequest(req);
     } catch (err) {
       setRequestError(
@@ -128,14 +108,14 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
             <Cat className="w-7 h-7" />
           </div>
           <h1 className="text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
-            {firebaseUser
+            {user
               ? isBootstrappedAdmin
                 ? 'Workspace Setup Attention Needed'
                 : 'Join AlloCat Team Workspace'
               : 'Sign in to AlloCat'}
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-            {firebaseUser
+            {user
               ? isBootstrappedAdmin
                 ? 'Could not complete cloud workspace initialization'
                 : 'Enter a team invite code or request collaborator access'
@@ -143,7 +123,7 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
           </p>
         </div>
 
-        {!firebaseUser ? (
+        {!user ? (
           <div className="p-6 space-y-4">
             <div className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200/80 dark:border-indigo-800/70 text-xs text-indigo-800 dark:text-indigo-200">
               <Cloud className="w-4 h-4 shrink-0 mt-0.5 text-indigo-600 dark:text-indigo-400" />
@@ -152,31 +132,29 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
               </span>
             </div>
 
+            {!isSupabaseConfigured && (
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  Supabase is not configured for this build. Set VITE_SUPABASE_URL and
+                  VITE_SUPABASE_ANON_KEY, then rebuild the app.
+                </span>
+              </div>
+            )}
+
             {authError && (
               <div className="space-y-2 p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300 text-xs">
                 <div className="flex items-start gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-600 dark:text-rose-400" />
                   <span>{authError}</span>
                 </div>
-                {unauthorizedHost && (
-                  <div className="pl-6 text-[11px] text-rose-600 dark:text-rose-300/90 space-y-1">
-                    <p>
-                      To enable Google Sign-In on this host, open{' '}
-                      <strong>Firebase Console → Authentication → Settings → Authorized domains</strong>{' '}
-                      and add:
-                    </p>
-                    <code className="block px-2 py-1 rounded bg-rose-100 dark:bg-rose-900/60 font-mono font-semibold">
-                      {unauthorizedHost}
-                    </code>
-                  </div>
-                )}
               </div>
             )}
 
             <button
               type="button"
               onClick={handleGoogleSignIn}
-              disabled={isSigningIn}
+              disabled={isSigningIn || !isSupabaseConfigured}
               className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold text-xs shadow-sm transition-colors cursor-pointer"
             >
               {isSigningIn ? (
@@ -196,10 +174,10 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
                   Signed in as
                 </div>
                 <div className="font-semibold text-slate-900 dark:text-slate-100 truncate">
-                  {firebaseUser.displayName || firebaseUser.email}
+                  {user.displayName || user.email}
                 </div>
                 <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400 truncate">
-                  {firebaseUser.email}
+                  {user.email}
                 </div>
               </div>
               <button
@@ -223,7 +201,7 @@ export const LoginOverlay: React.FC<LoginOverlayProps> = ({
               <div className="space-y-3">
                 <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
                   You are signed in as the workspace owner (
-                  <span className="font-mono font-semibold">{firebaseUser.email}</span>
+                  <span className="font-mono font-semibold">{user.email}</span>
                   ), so no invite code is required. Click retry below to initialize or reconnect to the cloud database.
                 </p>
                 <div className="flex gap-2">

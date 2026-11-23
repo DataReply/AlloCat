@@ -45,12 +45,12 @@ import {
 } from '../types';
 import { formatPersonTableName } from '../utils/allocationMath';
 import { ExportScope } from '../utils/importExportUtils';
-import { testFirestoreConnection } from '../firebase';
+import { testSupabaseConnection } from '../supabase';
 import {
   WorkspaceMember,
   WorkspaceRole,
   AdminCollabState
-} from '../utils/firestoreSync';
+} from '../utils/supabaseSync';
 
 export type AdminTab =
   | 'people'
@@ -1611,7 +1611,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             External Database Connection Test
                           </h4>
                           <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                            Verify authenticated access to the configured Firebase Cloud Firestore database. This performs a server read and does not write data.
+                            Verify authenticated access to the configured Supabase Postgres database. This performs a read-only server check.
                           </p>
                         </div>
                         <button
@@ -1622,7 +1622,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             setConnectionTestMessage(null);
                             const startedAt = performance.now();
                             try {
-                              await testFirestoreConnection();
+                              await testSupabaseConnection();
                               setConnectionTestStatus('success');
                               setConnectionTestMessage(
                                 `Connection successful (${Math.round(performance.now() - startedAt)} ms).`
@@ -1917,7 +1917,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                 Clear Workspace Data by Table / Area
                               </h3>
                               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                                Select specific SQLite tables/areas to wipe—or select all to start from a completely blank workspace. Admin login credentials are always preserved.
+                                Select specific SQLite tables/areas to wipe—or select all to start from a completely blank workspace. Supabase Auth accounts are separate and are not affected.
                               </p>
                             </div>
                           </div>
@@ -2131,7 +2131,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             Live Shared Cloud Workspace Active
                           </h3>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                            Every edit to people, projects, leaves, and allocations is saved to Firestore and pushed live to all collaborators—both on GitHub Pages and in preview.
+                            Every edit to people, projects, leaves, and allocations is saved to Supabase Postgres and pushed live to all collaborators—both on GitHub Pages and in preview.
                           </p>
                         </div>
                       </div>
@@ -2237,7 +2237,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           {currentHost && (
                             <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">
                               GitHub Pages / custom domains: ensure{' '}
-                              <code className="font-mono">{currentHost}</code> is listed under Firebase Console → Authentication → Authorized domains.
+                              <code className="font-mono">{currentHost}</code> is allowed under Supabase Authentication → URL Configuration → Redirect URLs, and configure Google as an enabled sign-in provider.
                             </p>
                           )}
                         </div>
