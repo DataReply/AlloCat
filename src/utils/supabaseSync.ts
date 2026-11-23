@@ -13,12 +13,10 @@ import type {
   Person,
   Project
 } from '../types';
-import { getDefaultAppState, type AppState } from '../data/seedData';
-import { initSQLiteWorkspace } from './sqliteDatabase';
+import type { AppState } from '../data/seedData';
 import { requireSupabase, type AuthUser } from '../supabase';
 
 export const DEFAULT_WORKSPACE_ID = 'default';
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'ictismylife@gmail.com';
 
 export type WorkspaceRole = 'admin' | 'editor';
 type Unsubscribe = () => void;
@@ -67,7 +65,6 @@ export type WorkspaceAccessResult =
       member: WorkspaceMember;
       isAdmin: boolean;
       bootstrapped: boolean;
-      migratedFromLocal: boolean;
     }
   | {
       status: 'needs_access';
@@ -97,7 +94,6 @@ interface WorkspaceAccessResponse {
   member?: unknown;
   isAdmin?: unknown;
   bootstrapped?: unknown;
-  migratedFromLocal?: unknown;
   existingRequest?: unknown;
 }
 
@@ -171,8 +167,7 @@ function mapAccessResponse(value: unknown): WorkspaceAccessResult {
       status: 'granted',
       member: mapMember(response.member),
       isAdmin: response.isAdmin === true,
-      bootstrapped: response.bootstrapped === true,
-      migratedFromLocal: response.migratedFromLocal === true
+      bootstrapped: response.bootstrapped === true
     };
   }
   if (response.status === 'needs_access') {
@@ -184,34 +179,11 @@ function mapAccessResponse(value: unknown): WorkspaceAccessResult {
   throw new Error('Supabase returned an invalid workspace access response.');
 }
 
-export function isBootstrappedAdminEmail(email?: string | null): boolean {
-  return (email || '').trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
-}
-
-async function getLocalSeedState(): Promise<AppState> {
-  try {
-    const boot = await Promise.race([
-      initSQLiteWorkspace(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Local database initialization timed out.')), 3000)
-      )
-    ]);
-    return boot.state;
-  } catch {
-    return getDefaultAppState();
-  }
-}
-
 export async function checkOrJoinWorkspace(
   user: AuthUser,
-  explicitInviteCode?: string | null
 ): Promise<WorkspaceAccessResult> {
-  const seedState = isBootstrappedAdminEmail(user.email)
-    ? await getLocalSeedState()
-    : getDefaultAppState();
   const { data, error } = await requireSupabase().rpc('ensure_workspace_access', {
-    p_invite_code: explicitInviteCode?.trim() || null,
-    p_seed_state: seedState,
+    p_invite_code: null,
     p_display_name: user.displayName || user.email || 'Collaborator',
     p_photo_url: user.photoURL || ''
   });
@@ -275,53 +247,6 @@ export async function submitJoinRequest(
   });
   assertNoError(error);
   return request;
-}
-
-export function subscribeToMemberAccess(
-  uid: string,
-  onGranted: () => void,
-  onError?: (err: Error) => void
-): Unsubscribe {
-  const client = requireSupabase();
-  let wasGranted = false;
-  let channel: RealtimeChannel | null = null;
-  const checkMembership = async () => {
-    const { data, error } = await client
-      .from('workspace_members')
-      .select('user_id')
-      .eq('workspace_id', DEFAULT_WORKSPACE_ID)
-      .eq('user_id', uid)
-      .maybeSingle();
-    if (error) {
-      onError?.(new Error(error.message));
-      return;
-    }
-    if (data && !wasGranted) {
-      wasGranted = true;
-      onGranted();
-    }
-  };
-  void checkMembership();
-  channel = client
-    .channel(`member-access-${uid}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'workspace_members',
-        filter: `user_id=eq.${uid}`
-      },
-      () => void checkMembership()
-    )
-    .subscribe((status, error) => {
-      if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-        onError?.(new Error(error?.message || `Member access subscription ${status.toLowerCase()}.`));
-      }
-    });
-  return () => {
-    if (channel) void client.removeChannel(channel);
-  };
 }
 
 function mapPerson(row: DatabaseRow): Person {
@@ -780,25 +705,6 @@ export async function rotateWorkspaceJoinCode(
   });
   assertNoError(error);
   return code;
-}
-
-export async function createWorkspaceEmailInvite(
-  adminUser: AuthUser,
-  email: string,
-  role: WorkspaceRole = 'editor'
-): Promise<void> {
-  const cleanEmail = email.trim().toLowerCase();
-  if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-    throw new Error('Please enter a valid Google email address.');
-  }
-  const { error } = await requireSupabase().from('workspace_invites').insert({
-    workspace_id: DEFAULT_WORKSPACE_ID,
-    id: `inv-${crypto.randomUUID()}`,
-    email: cleanEmail,
-    role,
-    invited_by_uid: adminUser.uid
-  });
-  assertNoError(error);
 }
 
 export async function deleteWorkspaceEmailInvite(inviteId: string): Promise<void> {

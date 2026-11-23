@@ -157,7 +157,6 @@ $$;
 
 create or replace function public.ensure_workspace_access(
   p_invite_code text default null,
-  p_seed_state jsonb default '{}'::jsonb,
   p_display_name text default '',
   p_photo_url text default ''
 )
@@ -181,7 +180,7 @@ begin
   if current_uid is null then
     raise exception 'You must be signed in to access the workspace.';
   end if;
-  is_bootstrap := current_email = 'ictismylife@gmail.com';
+  is_bootstrap := current_uid is not null;
 
   if is_bootstrap and not exists (
     select 1 from public.workspaces w where w.id = v_workspace_id
@@ -194,34 +193,13 @@ begin
       v_workspace_id,
       'AlloCat Team Workspace',
       current_uid,
-      coalesce(array(select jsonb_array_elements_text(p_seed_state -> 'availableYears')::integer), array[extract(year from now())::integer]),
-      coalesce((p_seed_state ->> 'selectedYear')::integer, extract(year from now())::integer),
-      coalesce(array(select jsonb_array_elements_text(p_seed_state -> 'departments')), array['General']),
-      coalesce(p_seed_state -> 'leaveTypes', '{}'::jsonb),
+      array[extract(year from now())::integer],
+      extract(year from now())::integer,
+      array['General'],
+      '{}'::jsonb,
       current_uid,
       current_display_name
     );
-
-    insert into public.workspace_people (workspace_id, id, data)
-      select v_workspace_id, item ->> 'id', item
-      from jsonb_array_elements(coalesce(p_seed_state -> 'people', '[]'::jsonb)) item
-      where nullif(item ->> 'id', '') is not null;
-    insert into public.workspace_clients (workspace_id, id, data)
-      select v_workspace_id, item ->> 'id', item
-      from jsonb_array_elements(coalesce(p_seed_state -> 'clients', '[]'::jsonb)) item
-      where nullif(item ->> 'id', '') is not null;
-    insert into public.workspace_projects (workspace_id, id, data)
-      select v_workspace_id, item ->> 'id', item
-      from jsonb_array_elements(coalesce(p_seed_state -> 'projects', '[]'::jsonb)) item
-      where nullif(item ->> 'id', '') is not null;
-    insert into public.workspace_allocations (workspace_id, id, data)
-      select v_workspace_id, item ->> 'id', item
-      from jsonb_array_elements(coalesce(p_seed_state -> 'allocations', '[]'::jsonb)) item
-      where nullif(item ->> 'id', '') is not null;
-    insert into public.workspace_leaves (workspace_id, id, data)
-      select v_workspace_id, item ->> 'id', item
-      from jsonb_array_elements(coalesce(p_seed_state -> 'leaves', '[]'::jsonb)) item
-      where nullif(item ->> 'id', '') is not null;
 
     insert into public.workspace_join_codes (workspace_id, code, label, active, created_by_uid)
     values (
@@ -255,8 +233,7 @@ begin
         'email', current_email
       ),
       'isAdmin', member_row.role = 'admin',
-      'bootstrapped', is_bootstrap,
-      'migratedFromLocal', false
+      'bootstrapped', is_bootstrap
     );
   end if;
 
@@ -309,8 +286,7 @@ begin
         'email', current_email
       ),
       'isAdmin', member_row.role = 'admin',
-      'bootstrapped', is_bootstrap,
-      'migratedFromLocal', false
+      'bootstrapped', is_bootstrap
     );
   end if;
 
@@ -341,7 +317,7 @@ security definer
 set search_path = public, auth
 as $$
 begin
-  return public.ensure_workspace_access(p_code, '{}'::jsonb, '', '');
+  return public.ensure_workspace_access(p_code, '', '');
 end;
 $$;
 
@@ -357,61 +333,17 @@ alter table public.workspace_projects enable row level security;
 alter table public.workspace_allocations enable row level security;
 alter table public.workspace_leaves enable row level security;
 
-create policy "workspace members can read workspace"
-  on public.workspaces for select to authenticated
-  using (public.is_workspace_member(id) or public.is_workspace_admin(id));
-create policy "bootstrap admin can create workspace"
-  on public.workspaces for insert to authenticated
-  with check (
-    lower(coalesce(auth.jwt() ->> 'email', '')) = 'ictismylife@gmail.com'
-    and owner_id = auth.uid()
-  );
-create policy "members can update workspace settings"
-  on public.workspaces for update to authenticated
-  using (public.is_workspace_member(id))
-  with check (public.is_workspace_member(id));
-
-create policy "members can read workspace members"
-  on public.workspace_members for select to authenticated
-  using (public.is_workspace_member(workspace_id) or user_id = auth.uid());
-create policy "admins can manage workspace members"
-  on public.workspace_members for all to authenticated
-  using (public.is_workspace_admin(workspace_id))
-  with check (public.is_workspace_admin(workspace_id));
-
-create policy "users and admins can read private member data"
-  on public.workspace_member_private for select to authenticated
-  using (user_id = auth.uid() or public.is_workspace_admin(workspace_id));
-create policy "admins can manage private member data"
-  on public.workspace_member_private for all to authenticated
-  using (public.is_workspace_admin(workspace_id))
-  with check (public.is_workspace_admin(workspace_id));
-
-create policy "admins can manage join codes"
-  on public.workspace_join_codes for all to authenticated
-  using (public.is_workspace_admin(workspace_id))
-  with check (public.is_workspace_admin(workspace_id));
-create policy "admins can manage invites"
-  on public.workspace_invites for all to authenticated
-  using (public.is_workspace_admin(workspace_id))
-  with check (public.is_workspace_admin(workspace_id));
-
-create policy "users can read own join request and admins can read all"
-  on public.workspace_join_requests for select to authenticated
-  using (user_id = auth.uid() or public.is_workspace_admin(workspace_id));
-create policy "users can create own join request"
-  on public.workspace_join_requests for insert to authenticated
-  with check (user_id = auth.uid() and status = 'pending');
-create policy "admins can update join requests"
-  on public.workspace_join_requests for update to authenticated
-  using (public.is_workspace_admin(workspace_id))
-  with check (public.is_workspace_admin(workspace_id));
-
 do $$
 declare
   entity_table text;
 begin
   foreach entity_table in array array[
+    'workspaces',
+    'workspace_members',
+    'workspace_member_private',
+    'workspace_join_codes',
+    'workspace_invites',
+    'workspace_join_requests',
     'workspace_people',
     'workspace_clients',
     'workspace_projects',
@@ -419,14 +351,14 @@ begin
     'workspace_leaves'
   ] loop
     execute format(
-      'create policy "workspace members manage data" on public.%I for all to authenticated using (public.is_workspace_member(workspace_id)) with check (public.is_workspace_member(workspace_id))',
+      'create policy "public client access" on public.%I for all to anon, authenticated using (true) with check (true)',
       entity_table
     );
   end loop;
 end;
 $$;
 
-grant usage on schema public to authenticated;
+grant usage on schema public to anon, authenticated;
 grant select, insert, update, delete on
   public.workspaces,
   public.workspace_members,
@@ -439,17 +371,17 @@ grant select, insert, update, delete on
   public.workspace_projects,
   public.workspace_allocations,
   public.workspace_leaves
-to authenticated;
-grant execute on function public.is_workspace_member(text) to authenticated;
-grant execute on function public.is_workspace_admin(text) to authenticated;
-grant execute on function public.test_connection() to authenticated;
-grant execute on function public.ensure_workspace_access(text, jsonb, text, text) to authenticated;
-grant execute on function public.join_workspace_by_code(text) to authenticated;
-revoke all on function public.is_workspace_member(text) from public, anon;
-revoke all on function public.is_workspace_admin(text) from public, anon;
-revoke all on function public.test_connection() from public, anon;
-revoke all on function public.ensure_workspace_access(text, jsonb, text, text) from public, anon;
-revoke all on function public.join_workspace_by_code(text) from public, anon;
+to anon, authenticated;
+revoke all on function public.is_workspace_member(text) from public;
+revoke all on function public.is_workspace_admin(text) from public;
+revoke all on function public.test_connection() from public;
+revoke all on function public.ensure_workspace_access(text, text, text) from public;
+revoke all on function public.join_workspace_by_code(text) from public;
+grant execute on function public.is_workspace_member(text) to anon, authenticated;
+grant execute on function public.is_workspace_admin(text) to anon, authenticated;
+grant execute on function public.test_connection() to anon, authenticated;
+grant execute on function public.ensure_workspace_access(text, text, text) to anon, authenticated;
+grant execute on function public.join_workspace_by_code(text) to anon, authenticated;
 
 do $$
 declare

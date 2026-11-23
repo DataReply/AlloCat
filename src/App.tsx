@@ -48,7 +48,14 @@ import {
 import { ReportingModal, ReportTab } from './components/ReportingModal';
 import { StandaloneAppModal } from './components/StandaloneAppModal';
 import { useOnlineStatus } from './utils/usePWAInstall';
-import { signOutUser, supabase, toAuthUser, type AuthUser } from './supabase';
+import {
+  isSupabaseConfigured,
+  restoreLocalAuth,
+  signOutUser,
+  subscribeToLocalAuthChange,
+  subscribeToSupabaseConfigChange,
+  type AuthUser
+} from './supabase';
 import { LoginOverlay } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
 import {
@@ -57,19 +64,14 @@ import {
 } from './utils/sqliteDatabase';
 import {
   AdminCollabState,
-  WorkspaceJoinRequest,
   WorkspaceMember,
-  WorkspaceRole,
   approveJoinRequest,
   checkOrJoinWorkspace,
-  createWorkspaceEmailInvite,
   deleteWorkspaceEmailInvite,
-  isBootstrappedAdminEmail,
   rejectJoinRequest,
   removeCollaborator,
   rotateWorkspaceJoinCode,
   subscribeToAdminCollabState,
-  subscribeToMemberAccess,
   subscribeToWorkspaceData,
   syncWorkspaceDeltaToSupabase,
   updateCollaboratorRole
@@ -94,26 +96,13 @@ export function App() {
   const [appState, setAppState] = useState<AppState>(() => getDefaultAppState());
   const [authReady, setAuthReady] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
-  const [accessStatus, setAccessStatus] = useState<'checking' | 'needs_access' | 'granted'>(
-    'checking'
-  );
-  const [accessDeniedReason, setAccessDeniedReason] = useState<string | null>(null);
-  const [existingJoinRequest, setExistingJoinRequest] = useState<WorkspaceJoinRequest | null>(
-    null
-  );
+  const [accessStatus, setAccessStatus] = useState<'checking' | 'granted'>('checking');
   const [currentMember, setCurrentMember] = useState<WorkspaceMember | null>(null);
   const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([]);
   const [adminCollabState, setAdminCollabState] = useState<AdminCollabState | null>(null);
   const [isWorkspaceHydrated, setIsWorkspaceHydrated] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [workspaceSyncError, setWorkspaceSyncError] = useState<string | null>(null);
-  const [initialInviteCode] = useState<string>(() => {
-    try {
-      return new URLSearchParams(window.location.search).get('invite') || '';
-    } catch {
-      return '';
-    }
-  });
   const [accessCheckNonce, setAccessCheckNonce] = useState(0);
 
   const isCloudReadyRef = useRef(false);
@@ -213,94 +202,102 @@ export function App() {
     };
   }, []);
 
-  // Listen to Supabase Auth state
+  // Local credentials control the app; Supabase anonymous auth supplies a database identity.
   useEffect(() => {
-    if (!supabase) {
-      setAuthReady(true);
-      return;
-    }
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ? toAuthUser(session.user) : null;
-      setCurrentUser(user);
-      setAuthReady(true);
-      if (!user) {
-        isCloudReadyRef.current = false;
-        pendingWritesCountRef.current = 0;
-        syncQueueRef.current = Promise.resolve();
-        setIsWorkspaceHydrated(false);
-        setAccessStatus('checking');
-        setCurrentMember(null);
-        setWorkspaceMembers([]);
-        setAdminCollabState(null);
-        setExistingJoinRequest(null);
-        setAccessDeniedReason(null);
-        setWorkspaceSyncError(null);
-        setSyncStatus('synced');
+    let cancelled = false;
+    const refreshLocalUser = async () => {
+      try {
+        const user = await restoreLocalAuth();
+        if (cancelled) return;
+        setCurrentUser(user);
+        setAuthReady(true);
+        if (!user) {
+          isCloudReadyRef.current = false;
+          pendingWritesCountRef.current = 0;
+          syncQueueRef.current = Promise.resolve();
+          setIsWorkspaceHydrated(false);
+          setAccessStatus('checking');
+          setCurrentMember(null);
+          setWorkspaceMembers([]);
+          setAdminCollabState(null);
+          setWorkspaceSyncError(null);
+          setSyncStatus('synced');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setCurrentUser(null);
+        setAuthReady(true);
+        setWorkspaceSyncError(formatCloudError(error));
+        setSyncStatus('error');
       }
-    });
-    return () => subscription.unsubscribe();
+    };
+    void refreshLocalUser();
+    const unsubscribeAuth = subscribeToLocalAuthChange(() => void refreshLocalUser());
+    const unsubscribeConfig = subscribeToSupabaseConfigChange(() => void refreshLocalUser());
+    return () => {
+      cancelled = true;
+      unsubscribeAuth();
+      unsubscribeConfig();
+    };
   }, []);
 
-  // Verify or initialize workspace membership whenever authenticated user changes
+  // Initialize the public cloud workspace after local app login.
   useEffect(() => {
     if (!currentUser) return;
     let cancelled = false;
     setAccessStatus('checking');
-    setAccessDeniedReason(null);
+    setWorkspaceSyncError(null);
 
-    checkOrJoinWorkspace(currentUser, initialInviteCode)
+    if (!isSupabaseConfigured()) {
+      setCurrentMember({
+        uid: currentUser.uid,
+        displayName: currentUser.displayName || 'admin',
+        photoURL: '',
+        role: 'admin',
+        joinedVia: 'bootstrap'
+      });
+      setAccessStatus('granted');
+      setIsWorkspaceHydrated(true);
+      setSyncStatus('error');
+      setWorkspaceSyncError('Supabase is not configured. Add the project URL and anon key in Admin Panel.');
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    checkOrJoinWorkspace(currentUser)
       .then((res) => {
         if (cancelled) return;
         if (res.status === 'granted') {
           setCurrentMember(res.member);
           setAccessStatus('granted');
-          setExistingJoinRequest(null);
-          if (initialInviteCode && typeof window !== 'undefined') {
-            try {
-              const url = new URL(window.location.href);
-              if (url.searchParams.has('invite')) {
-                url.searchParams.delete('invite');
-                window.history.replaceState({}, '', url.toString());
-              }
-            } catch {
-              // ignore URL cleanup errors
-            }
-          }
         } else {
-          setExistingJoinRequest(res.existingRequest);
-          setAccessStatus('needs_access');
+          throw new Error('Supabase did not grant workspace access. Check the anonymous access setup.');
         }
       })
       .catch((err) => {
         if (cancelled) return;
-        setAccessDeniedReason(formatCloudError(err));
-        setAccessStatus('needs_access');
+        setCurrentMember({
+          uid: currentUser.uid,
+          displayName: currentUser.displayName || 'admin',
+          photoURL: '',
+          role: 'admin',
+          joinedVia: 'bootstrap'
+        });
+        setAccessStatus('granted');
+        setIsWorkspaceHydrated(true);
+        setSyncStatus('error');
+        setWorkspaceSyncError(formatCloudError(err));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [currentUser, initialInviteCode, accessCheckNonce]);
-
-  // Auto-unlock while waiting for admin approval
-  useEffect(() => {
-    if (!currentUser || accessStatus !== 'needs_access') return;
-    return subscribeToMemberAccess(
-      currentUser.uid,
-      () => {
-        setAccessCheckNonce((n) => n + 1);
-      },
-      (err) => {
-        console.warn('Member access listener error:', err);
-      }
-    );
-  }, [currentUser, accessStatus]);
+  }, [currentUser, accessCheckNonce]);
 
   // Subscribe to the real-time collaborative Supabase workspace once access is granted.
   useEffect(() => {
-    if (!currentUser || accessStatus !== 'granted') return;
+    if (!currentUser || accessStatus !== 'granted' || !isSupabaseConfigured()) return;
 
     let firstHydration = true;
     setWorkspaceSyncError(null);
@@ -355,7 +352,12 @@ export function App() {
 
   // Subscribe to admin collaboration metadata when user is an admin
   useEffect(() => {
-    if (!currentUser || accessStatus !== 'granted' || currentMember?.role !== 'admin') {
+    if (
+      !currentUser ||
+      accessStatus !== 'granted' ||
+      currentMember?.role !== 'admin' ||
+      !isSupabaseConfigured()
+    ) {
       setAdminCollabState(null);
       return;
     }
@@ -1255,10 +1257,6 @@ export function App() {
     };
   }, [activeCellEditor, people, projects, allocations, selectedYear]);
 
-  const isBootstrappedAdmin = Boolean(
-    currentUser?.email && isBootstrappedAdminEmail(currentUser.email)
-  );
-
   if (
     !authReady ||
     (currentUser && accessStatus === 'checking') ||
@@ -1309,21 +1307,14 @@ export function App() {
     );
   }
 
-  const isAuthenticatedWorkspace = Boolean(currentUser && accessStatus === 'granted');
+  const isAuthenticatedWorkspace = Boolean(currentUser);
   const currentUserLabel =
     currentMember?.displayName || currentUser?.displayName || currentUser?.email || null;
 
   return (
     <div className="h-screen overflow-hidden flex flex-col bg-slate-200/70 dark:bg-slate-950 text-slate-900 dark:text-slate-100 relative">
       {!isAuthenticatedWorkspace && (
-        <LoginOverlay
-          user={currentUser}
-          isBootstrappedAdmin={isBootstrappedAdmin}
-          accessDeniedReason={accessDeniedReason}
-          existingRequest={existingJoinRequest}
-          initialInviteCode={initialInviteCode}
-          onAccessGranted={() => setAccessCheckNonce((n) => n + 1)}
-        />
+        <LoginOverlay />
       )}
 
       <div
@@ -1669,29 +1660,11 @@ export function App() {
               }
             : undefined
         }
-        onCreateEmailInvite={
-          currentUser
-            ? async (email: string, role: WorkspaceRole) => {
-                await createWorkspaceEmailInvite(currentUser, email, role);
-              }
-            : undefined
-        }
         onDeleteEmailInvite={deleteWorkspaceEmailInvite}
         onApproveJoinRequest={approveJoinRequest}
         onRejectJoinRequest={rejectJoinRequest}
         onUpdateMemberRole={updateCollaboratorRole}
         onRemoveMember={removeCollaborator}
-        onMigrateLocalToCloud={async () => {
-          const local = await initSQLiteWorkspace();
-          setAppState(local.state);
-          return (
-            local.state.people.length +
-            local.state.clients.length +
-            local.state.projects.length +
-            local.state.allocations.length +
-            local.state.leaves.length
-          );
-        }}
       />
 
       <ReportingModal
