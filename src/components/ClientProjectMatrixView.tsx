@@ -119,7 +119,7 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
       <div className="w-full flex-1 min-h-0 overflow-auto">
         <table
           className="w-full text-left border-collapse"
-          style={{ minWidth: `${540 + visibleMonthCount * 72}px` }}
+          style={{ minWidth: `${452 + visibleMonthCount * 72}px` }}
         >
         <thead>
           <tr className="bg-slate-200/90 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border-b border-slate-300 dark:border-slate-800 sticky top-0 z-20">
@@ -151,7 +151,7 @@ export const ClientProjectMatrixView: React.FC<ClientProjectMatrixViewProps> = (
               </div>
             </th>
 
-            <th className="py-2.5 px-3 w-[220px] min-w-[200px] max-w-[260px] bg-slate-200/90 dark:bg-slate-800 border-r border-slate-300 dark:border-slate-800">
+            <th className="py-2.5 px-3 w-[132px] min-w-[120px] max-w-[156px] bg-slate-200/90 dark:bg-slate-800 border-r border-slate-300 dark:border-slate-800">
               <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                 <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
                 <span>Comments & Scope Notes</span>
