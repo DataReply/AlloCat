@@ -1,38 +1,25 @@
-# Supabase setup and Firebase migration
+# Supabase setup
 
-The browser app now uses Supabase Auth (Google OAuth), Postgres, and Realtime. SQLite in IndexedDB remains a local mirror. The Firebase project is only used as the read-only migration source.
+The app uses local username/password sign-in and Supabase Postgres/Realtime. Google sign-in and automatic data migration are not used. Existing data must be imported manually through the app's Import / Export tools.
 
-## Configure Supabase
+## Configure a Supabase project
 
 1. Create a Supabase project and run [`migrations/20261123000000_initial_schema.sql`](./migrations/20261123000000_initial_schema.sql) in the Supabase SQL Editor.
-2. In **Authentication → Providers**, enable Google. Configure the OAuth callback URL shown by Supabase in the Google OAuth client.
-3. In **Authentication → URL Configuration**, set the site URL and add redirect URLs for the local app and deployed GitHub Pages URL, for example:
-   - `http://localhost:3000/**`
-   - `https://<owner>.github.io/<repository>/**`
-4. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in a local environment file, using the Supabase Project URL and anon/publishable key. These two values are used by the browser app; never put the service-role key in a `VITE_` variable.
-5. Add GitHub Actions repository secrets named `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` so the Pages workflow can build a configured app.
+2. Enable **Anonymous Sign-Ins** under **Authentication → Providers**. The app creates an anonymous Supabase identity after the local login so Realtime and database requests have a Supabase user ID. No Google provider or OAuth redirect configuration is needed.
+3. In the app, sign in with the local browser credentials and open **Admin Panel → Years & System**.
+4. Enter the Supabase **Project URL** and **anon/publishable key**, save them, and select **Test Connection**. The settings are stored in that browser's local storage; enter them separately in other browsers.
+5. Import workspace data yourself using **Admin Panel → Import / Export**.
 
-## Migrate the live workspace
+## Security warning
 
-The migration is non-destructive to Firebase and upserts records into Supabase. It exports a private JSON backup to the system temporary directory (or `MIGRATION_BACKUP_PATH` if set). Keep that backup secure.
+The initial schema grants public read/write access to the workspace tables. The local `admin` / `admin` login is only a browser-side app gate; it does not secure the Supabase database. Anyone who can access the deployed app and its public key can read and modify database contents. Use this setup only if that exposure is acceptable.
 
-1. Apply the Supabase schema above before running the migration.
-2. Create a Firebase service-account JSON file with read access to Firestore and list/read access to Firebase Authentication. Keep it outside the repository.
-3. Set these environment variables in the local shell (do not commit them):
-   - `FIREBASE_SERVICE_ACCOUNT_PATH=/secure/path/to/firebase-service-account.json`
-   - `SUPABASE_URL=https://<project-ref>.supabase.co`
-   - `SUPABASE_SERVICE_ROLE_KEY=<private service role key>`
-   - Optionally, `SUPABASE_WORKSPACE_ID=default` and `MIGRATION_BACKUP_PATH=/secure/path/backup.json`
-4. Run `bun run migrate:supabase` for a dry run. Review the counts and backup location.
-5. Run `bun run migrate:supabase --apply` to migrate, or add `--confirm-overwrite` if the target workspace already contains records.
-
-The migration creates corresponding Supabase Auth users by email where needed. Passwords and Firebase UIDs are not portable; configure Google OAuth in Supabase and have users sign in with their existing Google accounts. Membership and audit references are remapped to the new Supabase user IDs. Firebase data is not deleted.
+Only enter the project's public anon/publishable key in the app. **Never use a service-role or secret key** in browser settings, source code, environment variables prefixed with `VITE_`, or GitHub Pages.
 
 ## Local checks
 
-Copy `.env.example` to `.env.local` and fill in the two public Supabase app values. Then use:
-
 ```sh
+bun install --frozen-lockfile
 bun run lint
 bun run build
 ```

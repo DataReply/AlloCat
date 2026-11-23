@@ -24,7 +24,7 @@ import {
   Mail,
   CheckCircle2,
   Cloud,
-  Upload
+  Database
 } from 'lucide-react';
 import {
   Client,
@@ -45,7 +45,12 @@ import {
 } from '../types';
 import { formatPersonTableName } from '../utils/allocationMath';
 import { ExportScope } from '../utils/importExportUtils';
-import { testSupabaseConnection } from '../supabase';
+import {
+  configureSupabase,
+  getSupabaseConfig,
+  isSupabaseConfigured,
+  testSupabaseConnection
+} from '../supabase';
 import {
   WorkspaceMember,
   WorkspaceRole,
@@ -119,13 +124,11 @@ interface AdminPanelModalProps {
   members?: WorkspaceMember[];
   adminCollabState?: AdminCollabState | null;
   onRotateJoinCode?: () => Promise<void>;
-  onCreateEmailInvite?: (email: string, role: WorkspaceRole) => Promise<void>;
   onDeleteEmailInvite?: (inviteId: string) => Promise<void>;
   onApproveJoinRequest?: (request: AdminCollabState['joinRequests'][number], role: WorkspaceRole) => Promise<void>;
   onRejectJoinRequest?: (requestUid: string) => Promise<void>;
   onUpdateMemberRole?: (member: WorkspaceMember, email: string | undefined, role: WorkspaceRole) => Promise<void>;
   onRemoveMember?: (memberUid: string) => Promise<void>;
-  onMigrateLocalToCloud?: () => Promise<number>;
 }
 
 const CLIENT_COLORS = [
@@ -181,13 +184,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   members = [],
   adminCollabState = null,
   onRotateJoinCode,
-  onCreateEmailInvite,
   onDeleteEmailInvite,
   onApproveJoinRequest,
   onRejectJoinRequest,
   onUpdateMemberRole,
   onRemoveMember,
-  onMigrateLocalToCloud
 }) => {
   const [activeTab, setActiveTab] = useState<AdminTab>(initialTab);
   const [searchQuery, setSearchQuery] = useState('');
@@ -243,17 +244,39 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [clearFeedback, setClearFeedback] = useState<string | null>(null);
 
   // Team & Collaboration state
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<WorkspaceRole>('editor');
   const [teamBusy, setTeamBusy] = useState(false);
   const [teamFeedback, setTeamFeedback] = useState<string | null>(null);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [copiedInvite, setCopiedInvite] = useState<'link' | 'code' | null>(null);
-  const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
   const [connectionTestStatus, setConnectionTestStatus] = useState<
     'idle' | 'testing' | 'success' | 'error'
   >('idle');
   const [connectionTestMessage, setConnectionTestMessage] = useState<string | null>(null);
+  const [supabaseUrl, setSupabaseUrl] = useState('');
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState('');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    try {
+      const config = getSupabaseConfig();
+      setSupabaseUrl(config.url);
+      setSupabaseAnonKey(config.anonKey);
+    } catch (error) {
+      setConnectionTestStatus('error');
+      setConnectionTestMessage(error instanceof Error ? error.message : String(error));
+    }
+  }, [isOpen]);
+
+  const handleSaveSupabaseSettings = () => {
+    try {
+      configureSupabase({ url: supabaseUrl, anonKey: supabaseAnonKey });
+      setConnectionTestStatus('success');
+      setConnectionTestMessage('Supabase settings saved in this browser.');
+    } catch (error) {
+      setConnectionTestStatus('error');
+      setConnectionTestMessage(error instanceof Error ? error.message : String(error));
+    }
+  };
 
   // Filter lists
   const filteredPeople = useMemo(() => {
@@ -1593,30 +1616,62 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Cloud Sync & Migration Card */}
+                  {/* Supabase Connection Card */}
                   <div className="space-y-4">
                     <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
                       <div className="flex items-center gap-2.5">
-                        <Cloud className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                        <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                         <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                          Cloud Sync & Local Browser Migration
+                          Supabase Database
                         </h3>
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Workspace changes sync automatically in real time with all collaborators. If you previously saved data locally in this browser, you can push it to the shared cloud workspace.
+                        Enter your project URL and public anon/publishable key. These settings are stored in this browser and used for database sync.
                       </p>
-                      <div className="rounded-lg border border-slate-200 dark:border-slate-700 p-3 space-y-2">
-                        <div>
-                          <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            External Database Connection Test
-                          </h4>
-                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                            Verify authenticated access to the configured Supabase Postgres database. This performs a read-only server check.
-                          </p>
-                        </div>
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          Project URL
+                        </span>
+                        <input
+                          type="url"
+                          value={supabaseUrl}
+                          onChange={(event) => setSupabaseUrl(event.target.value)}
+                          placeholder="https://your-project.supabase.co"
+                          autoComplete="url"
+                          className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                          Public anon / publishable key
+                        </span>
+                        <input
+                          type="password"
+                          value={supabaseAnonKey}
+                          onChange={(event) => setSupabaseAnonKey(event.target.value)}
+                          placeholder="sb_publishable_... or anon key"
+                          autoComplete="off"
+                          className="w-full px-3 py-2 text-xs font-mono rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                        />
+                      </label>
+                      <div className="rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 p-3 text-[11px] text-amber-900 dark:text-amber-200 space-y-1">
+                        <p className="font-bold">Public database access</p>
+                        <p>
+                          The local login is only an app gate. Anyone with this app and key can access the database under the public policies. Never enter a Supabase service-role or secret key here.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
-                          disabled={connectionTestStatus === 'testing'}
+                          onClick={handleSaveSupabaseSettings}
+                          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-colors cursor-pointer"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                          <span>Save Settings</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={connectionTestStatus === 'testing' || !isSupabaseConfigured()}
                           onClick={async () => {
                             setConnectionTestStatus('testing');
                             setConnectionTestMessage(null);
@@ -1634,7 +1689,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               );
                             }
                           }}
-                          className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-60 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
                         >
                           <RefreshCw
                             className={`w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400 ${
@@ -1643,25 +1698,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           />
                           <span>
                             {connectionTestStatus === 'testing'
-                              ? 'Testing Connection...'
+                              ? 'Testing...'
                               : 'Test Connection'}
                           </span>
                         </button>
-                        {connectionTestMessage && (
-                          <p
-                            role="status"
-                            aria-live="polite"
-                            className={`text-[11px] break-words ${
-                              connectionTestStatus === 'success'
-                                ? 'text-emerald-700 dark:text-emerald-400'
-                                : 'text-rose-700 dark:text-rose-400'
-                            }`}
-                          >
-                            {connectionTestMessage}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
                         <button
                           type="button"
                           onClick={() => setActiveTab('team')}
@@ -1670,33 +1710,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           <UserPlus className="w-3.5 h-3.5 text-indigo-600" />
                           <span>Manage Collaborators ({members.length})</span>
                         </button>
-                        {onMigrateLocalToCloud && (
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              setMigrationStatus(null);
-                              try {
-                                const count = await onMigrateLocalToCloud();
-                                setMigrationStatus(
-                                  `Migrated ${count} record${count === 1 ? '' : 's'} from local browser storage into the shared cloud workspace.`
-                                );
-                              } catch (err) {
-                                setMigrationStatus(
-                                  err instanceof Error ? err.message : 'Migration failed.'
-                                );
-                              }
-                            }}
-                            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
-                          >
-                            <Upload className="w-3.5 h-3.5 text-indigo-600" />
-                            <span>Import Local Browser Data</span>
-                          </button>
-                        )}
                       </div>
-                      {migrationStatus && (
-                        <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                          {migrationStatus}
-                        </div>
+                      {connectionTestMessage && (
+                        <p
+                          role="status"
+                          aria-live="polite"
+                          className={`text-[11px] break-words ${
+                            connectionTestStatus === 'success'
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-rose-700 dark:text-rose-400'
+                          }`}
+                        >
+                          {connectionTestMessage}
+                        </p>
                       )}
                     </div>
 
@@ -2091,9 +2117,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     ? `${window.location.origin}${window.location.pathname}`
                     : '';
                 const inviteLink = activeJoinCode ? `${baseUrl}?invite=${activeJoinCode}` : '';
-                const currentHost =
-                  typeof window !== 'undefined' ? window.location.hostname : '';
-
                 const copyText = async (value: string, type: 'link' | 'code') => {
                   try {
                     await navigator.clipboard.writeText(value);
@@ -2101,23 +2124,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     setTimeout(() => setCopiedInvite(null), 1800);
                   } catch {
                     setTeamError('Could not copy to clipboard.');
-                  }
-                };
-
-                const handleInviteSubmit = async (e: React.FormEvent) => {
-                  e.preventDefault();
-                  if (!onCreateEmailInvite || !inviteEmail.trim()) return;
-                  setTeamError(null);
-                  setTeamFeedback(null);
-                  setTeamBusy(true);
-                  try {
-                    await onCreateEmailInvite(inviteEmail.trim(), inviteRole);
-                    setTeamFeedback(`Invited ${inviteEmail.trim().toLowerCase()} as ${inviteRole}.`);
-                    setInviteEmail('');
-                  } catch (err) {
-                    setTeamError(err instanceof Error ? err.message : 'Failed to invite user.');
-                  } finally {
-                    setTeamBusy(false);
                   }
                 };
 
@@ -2131,7 +2137,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             Live Shared Cloud Workspace Active
                           </h3>
                           <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-0.5">
-                            Every edit to people, projects, leaves, and allocations is saved to Supabase Postgres and pushed live to all collaborators—both on GitHub Pages and in preview.
+                            Workspace edits sync through Supabase. The local login is not a cloud access control; database access is public to anyone with the app and anon key.
                           </p>
                         </div>
                       </div>
@@ -2189,7 +2195,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             )}
                           </div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Share this link with teammates. Anyone who signs in with Google via this link joins automatically as an Editor.
+                            Invite links do not restrict access. Anyone with the app and public anon key can access the shared database.
                           </p>
                           {inviteLink ? (
                             <div className="space-y-2">
@@ -2234,51 +2240,22 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               Click Rotate Link to generate an active invite code.
                             </div>
                           )}
-                          {currentHost && (
-                            <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">
-                              GitHub Pages / custom domains: ensure{' '}
-                              <code className="font-mono">{currentHost}</code> is allowed under Supabase Authentication → URL Configuration → Redirect URLs, and configure Google as an enabled sign-in provider.
-                            </p>
-                          )}
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 pt-1">
+                            Enable Anonymous Sign-Ins in the Supabase project. OAuth redirect URLs are not used.
+                          </p>
                         </div>
 
-                        {/* Invite by Email */}
+                        {/* Email invitations need an email identity, which local login does not provide. */}
                         <div className="p-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 space-y-3">
                           <div className="flex items-center gap-2">
                             <Mail className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">
-                              Invite by Google Email
+                              Email Invitations Unavailable
                             </h3>
                           </div>
                           <p className="text-xs text-slate-500 dark:text-slate-400">
-                            Pre-authorize specific teammates by Google account email so they join automatically when signing in.
+                            Local app accounts do not have email identities. Invitations cannot restrict access because the Supabase database uses public policies.
                           </p>
-                          <form onSubmit={handleInviteSubmit} className="flex flex-wrap gap-2">
-                            <input
-                              type="email"
-                              required
-                              value={inviteEmail}
-                              onChange={(e) => setInviteEmail(e.target.value)}
-                              placeholder="colleague@company.com"
-                              className="flex-1 min-w-[180px] px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
-                            />
-                            <select
-                              value={inviteRole}
-                              onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
-                              className="px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
-                            >
-                              <option value="editor">Editor</option>
-                              <option value="admin">Admin</option>
-                            </select>
-                            <button
-                              type="submit"
-                              disabled={teamBusy}
-                              className="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
-                            >
-                              Send Invite
-                            </button>
-                          </form>
-
                           {adminCollabState && adminCollabState.invites.length > 0 && (
                             <div className="space-y-1.5 pt-1">
                               <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">

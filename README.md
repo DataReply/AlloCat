@@ -12,7 +12,7 @@ The local workspace mirror runs in an in-memory **SQLite 3** engine compiled to 
 - **Normalized Relational Schema (9 Tables + 2 Analytical Views)**:
   - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
   - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `jan_status`–`dec_status`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
-  - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `workspace_meta`. Authentication credentials are managed by Supabase Auth and are not stored in the local SQLite database.
+  - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `workspace_meta`. The local app login is stored separately in browser storage.
   - **Analytical SQL Views**: `v_allocation_months` (monthly percentages + statuses), `v_person_annual_summary`
 
 ---
@@ -72,17 +72,18 @@ Open **Import / Export** from the **Admin Panel** (accessible via the **AlloCat 
 
 Before signing in, the workspace is locked behind a sign-in overlay.
 
-Shared authentication and cloud workspace data use Supabase Auth, Postgres, and Realtime. Configure the browser's `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, enable Google OAuth in Supabase, and add GitHub Pages redirect URLs. See [Supabase setup and Firebase migration](./supabase/README.md) for deployment configuration and the non-destructive live data migration procedure.
+App sign-in uses local credentials (`admin` / `admin` on a fresh browser). Supabase anonymous Auth supplies an identity for Postgres and Realtime; Google sign-in is not used. Configure the Supabase project URL and public anon/publishable key in **Admin Panel → Years & System**. The app does not copy data between databases; import it yourself with the existing Import / Export tools. See [Supabase setup](./supabase/README.md) for project configuration and the public-access warning.
 
-- **Sign-In:** Continue with Google through the configured Supabase Auth project. The bootstrapped workspace owner is `ictismylife@gmail.com`.
+- **Sign-In:** Local browser login. The initial username and password are both `admin`.
 - **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
-  - **Open Admin Panel (`Manage All`)**: Centralized management modal with six tabs and Quick Jump shortcuts:
+  - **Open Admin Panel (`Manage All`)**: Centralized management modal with seven tabs and Quick Jump shortcuts:
     1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, and remove staff.
     2. **Departments**: Create departments, inline-rename existing departments (cascading updates to team members), and remove unused departments.
     3. **Clients**: Search client organizations, create clients with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients with cascading project cleanup.
     4. **Projects**: Search deliverable projects, inspect codes, parent clients, billing status (`Billable` vs. `Internal`), and assigned headcount, or add, edit, and delete projects.
     5. **Time Off & Leaves**: Browse all scheduled leaves, customize leave types and default impacts, schedule new time off, or remove leave entries.
-    6. **Years & System**: Add/switch/remove planning years, test the Supabase connection, open Import/Export tools, or reset the workspace to default seed data.
+    6. **Team & Collaboration**: View workspace sessions and collaboration settings. Email invitations are unavailable with local-only sign-in.
+    7. **Years & System**: Configure the Supabase project URL and public anon/publishable key, test the connection, manage planning years, open Import/Export tools, or reset the workspace. Database access is public under the configured policies.
   - **Reporting & Analytics**: Jump straight to the Reporting & Capacity Analytics modal.
   - **Switch to Light / Dark Mode**: Toggle between Dark Mode (default) and balanced Light Mode.
   - **Windows & Offline App**: Open the desktop PWA installer and portable bundle generator.
