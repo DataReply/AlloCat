@@ -100,6 +100,24 @@ export function getPersonCapacitySummary(
   maxCapacity: number = 100,
   leaves: LeaveEntry[] = []
 ): MonthlyCapacitySummary {
+  if (personId === 'p-tbd') {
+    const totals = Array(12).fill(0);
+    for (const alloc of allocations) {
+      if (alloc.personId !== personId || alloc.year !== year) continue;
+      for (let m = 0; m < 12; m++) totals[m] += alloc.monthlyPercentage[m] || 0;
+    }
+    return {
+      totals,
+      effectiveCapacities: Array(12).fill(1000000),
+      leaveReductions: Array(12).fill(0),
+      monthLeaves: Array.from({ length: 12 }, () => []),
+      annualAverage: Math.round(totals.reduce((sum, value) => sum + value, 0) / 12),
+      maxMonthPct: Math.max(0, ...totals),
+      hasOvertime: false,
+      overtimeMonths: []
+    };
+  }
+
   const totals = Array(12).fill(0);
   const effectiveCapacities = Array(12).fill(maxCapacity);
   const leaveReductions = Array(12).fill(0);

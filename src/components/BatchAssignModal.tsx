@@ -50,6 +50,8 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
   const [percentage, setPercentage] = useState<number>(50);
   const [status, setStatus] = useState<AllocationStatus>('planned');
   const [notes, setNotes] = useState('');
+  const selectedPerson = people.find((person) => person.id === personId);
+  const isPlaceholder = selectedPerson?.isPlaceholder === true;
 
   useEffect(() => {
     if (isOpen) {
@@ -191,15 +193,15 @@ export const BatchAssignModal: React.FC<BatchAssignModalProps> = ({
             </div>
             <input
               type="range"
-              min={5}
-              max={100}
-              step={5}
+              min={0}
+              max={isPlaceholder ? 1000000 : 100}
+              step={isPlaceholder ? 25 : 5}
               value={percentage}
               onChange={(e) => setPercentage(Number(e.target.value))}
               className="w-full accent-blue-600 cursor-pointer"
             />
-            <div className="grid grid-cols-4 gap-1.5 mt-2">
-              {[25, 50, 75, 100].map((val) => (
+            <div className={`grid gap-1.5 mt-2 ${isPlaceholder ? 'grid-cols-6' : 'grid-cols-4'}`}>
+              {(isPlaceholder ? [25, 50, 100, 200, 500, 1000] : [25, 50, 75, 100]).map((val) => (
                 <button
                   key={val}
                   type="button"

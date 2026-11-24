@@ -85,6 +85,7 @@ export const SQLITE_TABLE_SCHEMAS: SQLiteTableSchemaDescriptor[] = [
       'avatar_color',
       'initials',
       'is_active',
+      'is_placeholder',
       'notes'
     ],
     description:
@@ -1468,6 +1469,7 @@ function toSQLitePersonRecord(p: Person) {
     avatar_color: p.avatarColor,
     initials: p.initials,
     is_active: p.isActive !== false ? 1 : 0,
+    is_placeholder: p.isPlaceholder === true ? 1 : 0,
     notes: p.notes || ''
   };
 }
@@ -3161,6 +3163,12 @@ function importFromJsonContent(
         initials: String(
           p.initials || (idx >= 0 ? nextPeople[idx].initials : getInitials(fullName))
         ),
+        isPlaceholder:
+          p.is_placeholder !== undefined || p.isPlaceholder !== undefined
+            ? ['1', 'true', 'yes'].includes(
+                String(p.is_placeholder ?? p.isPlaceholder).trim().toLowerCase()
+              )
+            : incomingId === 'p-tbd',
         isActive:
           p.is_active !== undefined || p.isActive !== undefined
             ? ['1', 'true', 'active', 'yes'].includes(

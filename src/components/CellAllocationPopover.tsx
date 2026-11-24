@@ -80,7 +80,9 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
   }, [leaves, person.id, selectedYear, monthIndex]);
 
   const totalLeaveImpact = activeLeavesInMonth.reduce((acc, l) => acc + l.impactPercent, 0);
-  const effectiveCapacity = Math.max(0, person.maxCapacityPercent - totalLeaveImpact);
+  const effectiveCapacity = person.isPlaceholder
+    ? 1000000
+    : Math.max(0, person.maxCapacityPercent - totalLeaveImpact);
 
   const personAllocationsInMonth = useMemo(() => {
     const personAllocs = allocations.filter(
@@ -161,7 +163,7 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
     .reduce((sum, item) => sum + item.percentage, 0);
 
   const totalWithNewAllocation = otherProjectsSum + percentage;
-  const isOverAllocated = totalWithNewAllocation > effectiveCapacity;
+  const isOverAllocated = !person.isPlaceholder && totalWithNewAllocation > effectiveCapacity;
   const excess = totalWithNewAllocation - effectiveCapacity;
   const unassignedCapacity = Math.max(0, effectiveCapacity - totalWithNewAllocation);
 
@@ -230,8 +232,8 @@ export const CellAllocationPopover: React.FC<CellAllocationPopoverProps> = ({
           <input
             type="range"
             min={0}
-            max={100}
-            step={5}
+            max={person.isPlaceholder ? 1000000 : 100}
+            step={person.isPlaceholder ? 25 : 5}
             value={percentage}
             onChange={(e) => setPercentage(Number(e.target.value))}
             className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
