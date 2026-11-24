@@ -10,7 +10,7 @@ The local workspace mirror runs in an in-memory **SQLite 3** engine compiled to 
 
 - **Primary Persistence**: Binary `.sqlite` database stored in browser **IndexedDB** (`allocat_sqlite_idb`), mirrored to a base64 backup in `localStorage` (`allocat_sqlite_b64_v1`), with automatic one-time migration from legacy `localStorage` payloads.
 - **Normalized Relational Schema (9 Tables + 2 Analytical Views)**:
-  - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
+  - **Master Tables**: `people` (`id`, `first_name`, `last_name`, `full_name`, `role`, `department`, `employment_type`, `email`, `max_capacity_percent`, `avatar_color`, `initials`, `is_active`, `notes`), `clients` (`id`, `name`, `industry`, `color`, `status`), `projects` (`id`, `client_id`, `name`, `code`, `status`, `color`, `billable`, `notes`)
   - **Fact Tables**: `allocations` (`id`, `person_id`, `project_id`, `year`, `jan`–`dec`, `jan_status`–`dec_status`, `notes`), `leaves` (`id`, `person_id`, `leave_type`, `title`, `year`, `start_month`, `end_month`, `impact_percent`, `notes`)
   - **Config & System Tables**: `departments`, `leave_types`, `planning_years`, `workspace_meta`. The local app login is stored separately in browser storage.
   - **Analytical SQL Views**: `v_allocation_months` (monthly percentages + statuses), `v_person_annual_summary`
@@ -27,7 +27,7 @@ AlloCat lets you inspect and edit your organization's staffing plan from four sy
    - Displays color-coded **per-month allocation statuses** (**Unknown** gray, **Planned** yellow, **Confirmed** green) with one-click inline status cycling and a color legend above the matrix.
 
 2. **By People (`PeopleMatrixView`)**
-   - Displays every team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`).
+   - Displays every active team member in **`Last Name, First Name`** format (sorted **`A → Z`** by Last Name by default) alongside their employment type badge (`Internal`, `External`, `B2B`), annual average utilization, and monthly capacity totals (`Jan` – `Dec`). Active status can be changed in the person's edit dialog. Deactivated people remain stored for reactivation but are excluded from planning views, reports, assignments, leave scheduling, alerts, and capacity calculations.
    - Displays color-coded monthly allocation statuses on person summary rows (**Unknown**, **Planned**, **Confirmed**, or **Mixed** when multiple projects differ in the same month) with one-click status cycling directly on the summary cell.
    - Expand any person's row (or click **Expand All Rows**) to view and edit individual project allocations and per-month statuses (**Unknown**, **Planned**, **Confirmed**) month by month.
    - Click any monthly project cell to open the **Total Workload & Allocation Popover**, showing an itemized breakdown, a multi-segment capacity bar, active leave reductions, month status selector, and quick project switching.
@@ -77,14 +77,14 @@ App sign-in uses browser-local username/password accounts (`admin` / `admin` on 
 - **Sign-In:** Local browser login. The initial username and password are both `admin`; password hashes and account roles are stored in that browser's local storage.
 - **Logo Button Menu & Admin Control Panel**: Once signed in, click the **AlloCat logo button** (top-left header, displaying the active username badge) to open the administrator dropdown menu:
   - **Open Admin Panel (`Manage All`)**: Centralized management modal with account management for Admins and Quick Jump shortcuts:
-    1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, and remove staff.
+    1. **People & Team**: Search and browse team members (`A → Z`), inspect roles, departments, contract types, and max capacity, or add, edit, activate/deactivate, and remove staff. Inactive staff are still listed in the Admin Panel and marked **Inactive**, making reactivation available without deleting historical data.
     2. **Departments**: Create departments, inline-rename existing departments (cascading updates to team members), and remove unused departments.
     3. **Clients**: Search client organizations, create clients with status (`Active`, `Lead`, `Completed`), industry, and brand color, or edit and delete clients with cascading project cleanup.
     4. **Projects**: Search deliverable projects, inspect codes, parent clients, billing status (`Billable` vs. `Internal`), and assigned headcount, or add, edit, and delete projects.
     5. **Time Off & Leaves**: Browse all scheduled leaves, customize leave types and default impacts, schedule new time off, or remove leave entries.
     6. **Team & Collaboration**: View workspace sessions and collaboration settings. Email invitations are unavailable with local-only sign-in.
     7. **App Accounts** (Admin only): Create browser-local accounts, assign Admin/Editor/Viewer roles, reset passwords, or remove accounts. At least one Admin account is required.
-    8. **Years & System**: Test the configured Supabase connection, manage planning years, open Import/Export tools, or reset the workspace. Database access is public under the configured policies.
+    8. **Years & System**: Test the configured Supabase connection, manage planning years, open Import/Export tools, reset the workspace, or selectively clear workspace areas. Clearing requires a full SQLite backup to be created and downloaded first; changing the clear selection invalidates that backup approval. Database access is public under the configured policies.
   - **Reporting & Analytics**: Jump straight to the Reporting & Capacity Analytics modal.
   - **Switch to Light / Dark Mode**: Toggle between Dark Mode (default) and balanced Light Mode.
   - **Windows & Offline App**: Open the desktop PWA installer and portable bundle generator.
@@ -100,6 +100,10 @@ App sign-in uses browser-local username/password accounts (`admin` / `admin` on 
   - **Visible Months Selector**: Focus the matrix on specific quarters, half-years, or custom month subsets (`Jan` – `Dec`).
 - **Default `A → Z` Sorting**: Sorts people (`Last Name: A → Z`) and clients/projects (`A → Z`) by default, with quick toggles for `Z–A`, `First Name`, or `Original Order`.
 - **Person-Grouped Overtime Alerts Drawer**: Groups all over-allocated months per team member with one-click per-month **Auto-Cap** and **Auto-Cap All Months** actions.
+- **Person Active / Inactive Status**:
+  - Edit a team member and use the Person Status switch to deactivate or reactivate them.
+  - Existing and imported people default to active when no explicit status is provided.
+  - Inactive people remain available in the Admin Panel but disappear from operational views and calculations.
 - **Per-Month Allocation Statuses & Theme Contrast**:
   - Track commitment per person, project, and month using three statuses: **Unknown** (gray), **Planned** (yellow), and **Confirmed** (green).
   - Toggle statuses inline directly inside matrix cells, in the **Cell Allocation Popover**, or across a month range via **Assign Staff** (`BatchAssignModal`).
