@@ -674,12 +674,24 @@ export function App() {
     const { personId, projectId, monthIndex } = activeCellEditor;
 
     setAppState((prev) => {
-      const existingIdx = prev.allocations.findIndex(
-        (a) =>
-          a.personId === personId &&
-          a.projectId === projectId &&
-          a.year === prev.selectedYear
-      );
+      const isPlaceholder = personId === 'p-tbd';
+      const existingPlaceholderIdx = isPlaceholder
+        ? prev.allocations.findIndex(
+            (a) =>
+              a.personId === personId &&
+              a.projectId === projectId &&
+              a.year === prev.selectedYear &&
+              (a.monthlyPercentage[monthIndex] || 0) > 0
+          )
+        : -1;
+      const existingIdx = isPlaceholder
+        ? existingPlaceholderIdx
+        : prev.allocations.findIndex(
+            (a) =>
+              a.personId === personId &&
+              a.projectId === projectId &&
+              a.year === prev.selectedYear
+          );
 
       const nextAllocations = [...prev.allocations];
 
@@ -726,7 +738,9 @@ export function App() {
           freshStatuses[monthIndex] = newStatus;
         }
         nextAllocations.push({
-          id: `a-${Date.now()}`,
+          id: personId === 'p-tbd'
+            ? `a-tbd-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+            : `a-${Date.now()}`,
           personId,
           projectId,
           year: prev.selectedYear,
@@ -793,12 +807,15 @@ export function App() {
     notes?: string
   ) => {
     setAppState((prev) => {
-      const existingIdx = prev.allocations.findIndex(
-        (a) =>
-          a.personId === personId &&
-          a.projectId === projectId &&
-          a.year === prev.selectedYear
-      );
+      const isPlaceholder = personId === 'p-tbd';
+      const existingIdx = isPlaceholder
+        ? -1
+        : prev.allocations.findIndex(
+            (a) =>
+              a.personId === personId &&
+              a.projectId === projectId &&
+              a.year === prev.selectedYear
+          );
       const nextAllocations = [...prev.allocations];
 
       if (existingIdx >= 0) {
@@ -825,7 +842,9 @@ export function App() {
           freshStatuses[m] = status;
         }
         nextAllocations.push({
-          id: `a-${Date.now()}`,
+          id: personId === 'p-tbd'
+            ? `a-tbd-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+            : `a-${Date.now()}`,
           personId,
           projectId,
           year: prev.selectedYear,
@@ -1241,7 +1260,10 @@ export function App() {
       (a) =>
         a.personId === person.id &&
         a.projectId === project.id &&
-        a.year === selectedYear
+        a.year === selectedYear &&
+        (person.isPlaceholder
+          ? (a.monthlyPercentage[activeCellEditor.monthIndex] || 0) > 0
+          : true)
     );
     const currentPercentage =
       existingAlloc?.monthlyPercentage[activeCellEditor.monthIndex] || 0;
