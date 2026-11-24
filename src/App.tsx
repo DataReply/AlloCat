@@ -81,6 +81,9 @@ import {
 
 function formatCloudError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err || 'Unknown cloud error');
+  if (/Cannot coerce the result to a single JSON object|PGRST116/i.test(raw)) {
+    return 'Supabase workspace lookup returned no unique row. Verify that the migration is applied and the new project contains a workspace with id "default".';
+  }
   try {
     const parsed = JSON.parse(raw) as { error?: string; path?: string; operationType?: string };
     if (parsed && typeof parsed === 'object' && parsed.error) {

@@ -97,8 +97,10 @@ interface WorkspaceAccessResponse {
   existingRequest?: unknown;
 }
 
-function assertNoError(error: { message: string } | null): void {
-  if (error) throw new Error(error.message);
+function assertNoError(error: { message: string; code?: string; details?: string } | null): void {
+  if (!error) return;
+  const details = [error.code, error.details, error.message].filter(Boolean).join(' — ');
+  throw new Error(details);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -353,9 +355,9 @@ async function fetchWorkspaceState(): Promise<AppState> {
     await Promise.all([
       client
         .from('workspaces')
-        .select('available_years,selected_year,departments,leave_types')
+        .select('id,available_years,selected_year,departments,leave_types')
         .eq('id', DEFAULT_WORKSPACE_ID)
-        .single(),
+        .limit(2),
       fetchEntityRows('workspace_people'),
       fetchEntityRows('workspace_clients'),
       fetchEntityRows('workspace_projects'),
@@ -369,8 +371,16 @@ async function fetchWorkspaceState(): Promise<AppState> {
   assertNoError(workspaceResult.error);
   assertNoError(membersResult.error);
 
-  const workspace = workspaceResult.data;
-  if (!workspace) throw new Error('The Supabase workspace record was not found.');
+  const workspaceRows = workspaceResult.data || [];
+  if (workspaceRows.length === 0) {
+    throw new Error(
+      'The Supabase project does not contain the AlloCat "default" workspace. Run the migration and refresh workspace access.'
+    );
+  }
+  if (workspaceRows.length > 1) {
+    throw new Error('The Supabase "default" workspace lookup returned multiple rows. Check workspace IDs and RLS policies.');
+  }
+  const workspace = workspaceRows[0];
   const members: WorkspaceMember[] = (membersResult.data || []).map((member) => ({
     uid: member.user_id,
     displayName: member.display_name,

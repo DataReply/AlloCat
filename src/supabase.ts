@@ -141,6 +141,10 @@ export function configureSupabase(config: SupabaseConfig): void {
     }
   }
 
+  const nextConfig = url && anonKey ? `${url}\n${anonKey}` : '';
+  if (activeConfigSignature && activeConfigSignature !== nextConfig && activeClient) {
+    void activeClient.auth.signOut({ scope: 'local' }).catch(() => undefined);
+  }
   if (url && anonKey) {
     localStorage.setItem(SUPABASE_CONFIG_KEY, JSON.stringify({ url, anonKey }));
   } else {
