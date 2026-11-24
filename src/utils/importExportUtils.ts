@@ -84,6 +84,7 @@ export const SQLITE_TABLE_SCHEMAS: SQLiteTableSchemaDescriptor[] = [
       'max_capacity_percent',
       'avatar_color',
       'initials',
+      'is_active',
       'notes'
     ],
     description:
@@ -1466,6 +1467,7 @@ function toSQLitePersonRecord(p: Person) {
     max_capacity_percent: p.maxCapacityPercent ?? 100,
     avatar_color: p.avatarColor,
     initials: p.initials,
+    is_active: p.isActive !== false ? 1 : 0,
     notes: p.notes || ''
   };
 }
@@ -1872,6 +1874,7 @@ export function generateTemplateCSV(
             100,
             '#2563EB',
             'JD',
+            1,
             'React & TypeScript Lead'
           ],
           [
@@ -1886,6 +1889,7 @@ export function generateTemplateCSV(
             100,
             '#7C3AED',
             'AR',
+            1,
             'Design Systems & Prototyping'
           ]
         ]);
@@ -3157,6 +3161,14 @@ function importFromJsonContent(
         initials: String(
           p.initials || (idx >= 0 ? nextPeople[idx].initials : getInitials(fullName))
         ),
+        isActive:
+          p.is_active !== undefined || p.isActive !== undefined
+            ? ['1', 'true', 'active', 'yes'].includes(
+                String(p.is_active ?? p.isActive).trim().toLowerCase()
+              )
+            : idx >= 0
+            ? nextPeople[idx].isActive !== false
+            : true,
         notes:
           p.notes !== undefined
             ? String(p.notes || '') || undefined

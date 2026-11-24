@@ -751,8 +751,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                       {person.initials}
                                     </div>
                                     <div>
-                                      <div className="font-semibold text-slate-900 dark:text-slate-100">
-                                        {formatPersonTableName(person)}
+                                      <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                                        <span>{formatPersonTableName(person)}</span>
+                                        {person.isActive === false && (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                            Inactive
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="text-[11px] text-slate-400 font-mono">
                                         {person.email}

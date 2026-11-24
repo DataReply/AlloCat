@@ -267,6 +267,7 @@ function mapPerson(row: DatabaseRow): Person {
     maxCapacityPercent: asNumber(data.maxCapacityPercent, 100),
     avatarColor: asString(data.avatarColor, '#2563EB'),
     initials: asString(data.initials),
+    isActive: data.isActive !== false,
     notes: asString(data.notes)
   };
 }

@@ -567,6 +567,7 @@ export function normalizeAppStatePayload(parsed: Partial<AppState> | null | unde
         p.employmentType === 'B2B'
           ? p.employmentType
           : defaultPerson?.employmentType || 'Internal',
+      isActive: p.isActive !== undefined ? p.isActive : true,
       notes: p.notes !== undefined ? p.notes : (defaultPerson?.notes || '')
     };
   });

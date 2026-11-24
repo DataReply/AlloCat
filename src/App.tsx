@@ -437,14 +437,19 @@ export function App() {
     leaveTypes = DEFAULT_LEAVE_TYPE_CONFIG
   } = appState;
 
+  const activePeople = useMemo(
+    () => people.filter((person) => person.isActive !== false),
+    [people]
+  );
+
   const kpis = useMemo(
-    () => calculateExecutiveKPIs(people, projects, allocations, leaves, selectedYear),
-    [people, projects, allocations, leaves, selectedYear]
+    () => calculateExecutiveKPIs(activePeople, projects, allocations, leaves, selectedYear),
+    [activePeople, projects, allocations, leaves, selectedYear]
   );
 
   // Filtered & sorted people
   const filteredPeople = useMemo(() => {
-    const matched = people.filter((person) => {
+    const matched = activePeople.filter((person) => {
       if (filters.department !== 'all' && person.department !== filters.department) {
         return false;
       }
@@ -1432,7 +1437,7 @@ export function App() {
           <ClientProjectMatrixView
             clients={sortedClients}
             projects={filteredProjects}
-            people={people}
+            people={activePeople}
             allocations={allocations}
             leaves={leaves}
             selectedYear={selectedYear}
@@ -1604,7 +1609,7 @@ export function App() {
       {currentRole !== 'viewer' && <BatchAssignModal
         isOpen={assignModalState.isOpen}
         onClose={() => setAssignModalState({ isOpen: false })}
-        people={people}
+        people={activePeople}
         projects={projects}
         clients={clients}
         selectedYear={selectedYear}
@@ -1707,7 +1712,7 @@ export function App() {
         isOpen={reportingModalState.isOpen}
         initialTab={reportingModalState.tab}
         onClose={() => setReportingModalState((prev) => ({ ...prev, isOpen: false }))}
-        people={people}
+        people={activePeople}
         departments={departments}
         clients={clients}
         projects={projects}
@@ -1750,7 +1755,7 @@ export function App() {
       {currentRole !== 'viewer' && <AddLeaveModal
         isOpen={leaveModalState.isOpen}
         onClose={() => setLeaveModalState({ isOpen: false })}
-        people={people}
+        people={activePeople}
         selectedYear={selectedYear}
         defaultPersonId={leaveModalState.personId}
         defaultMonthIndex={leaveModalState.monthIndex}
@@ -1761,7 +1766,7 @@ export function App() {
       {currentRole !== 'viewer' && <OvertimeAlertsDrawer
         isOpen={isOvertimeDrawerOpen}
         onClose={() => setIsOvertimeDrawerOpen(false)}
-        people={people}
+        people={activePeople}
         projects={projects}
         clients={clients}
         allocations={allocations}
