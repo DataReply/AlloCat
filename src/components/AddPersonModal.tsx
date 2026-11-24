@@ -276,9 +276,9 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
                 role="switch"
                 aria-checked={isActive}
                 onClick={() => setIsActive((active) => !active)}
-                className={`relative w-10 h-5 rounded-full transition-colors cursor-pointer ${isActive ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-slate-600'}`}
+                className={`relative flex h-5 w-10 items-center rounded-full px-0.5 transition-colors cursor-pointer ${isActive ? 'justify-end bg-emerald-500' : 'justify-start bg-slate-300 dark:bg-slate-600'}`}
               >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${isActive ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                <span className="block h-4 w-4 rounded-full bg-white shadow-sm" />
               </button>
             </div>
           )}
