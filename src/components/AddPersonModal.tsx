@@ -49,6 +49,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
   const [email, setEmail] = useState('');
   const [maxCapacityPercent, setMaxCapacityPercent] = useState<number>(100);
   const [avatarColor, setAvatarColor] = useState<string>(AVATAR_COLORS[0]);
+  const [isActive, setIsActive] = useState(true);
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
@@ -70,6 +71,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       setEmail(personToEdit.email || '');
       setMaxCapacityPercent(personToEdit.maxCapacityPercent ?? 100);
       setAvatarColor(personToEdit.avatarColor || AVATAR_COLORS[0]);
+      setIsActive(personToEdit.isActive !== false);
       setNotes(personToEdit.notes || '');
     } else {
       setFirstName('');
@@ -82,6 +84,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
       setAvatarColor(
         AVATAR_COLORS[Math.floor(Math.random() * AVATAR_COLORS.length)]
       );
+      setIsActive(true);
       setNotes('');
     }
   }, [isOpen, personToEdit, departments]);
@@ -120,6 +123,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         maxCapacityPercent,
         avatarColor,
         initials: getInitials(cleanFirst, cleanLast),
+        isActive,
         notes: notes.trim() || undefined
       });
     } else {
@@ -134,6 +138,7 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
         maxCapacityPercent,
         avatarColor,
         initials: getInitials(cleanFirst, cleanLast),
+        isActive,
         notes: notes.trim() || undefined
       });
     }
@@ -257,6 +262,26 @@ export const AddPersonModal: React.FC<AddPersonModalProps> = ({
               ))}
             </div>
           </div>
+
+          {isEditing && (
+            <div className="flex items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60">
+              <div>
+                <div className="font-semibold text-slate-700 dark:text-slate-300">Person status</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                  {isActive ? 'Active and visible in workspace views' : 'Inactive and hidden from workspace views'}
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isActive}
+                onClick={() => setIsActive((active) => !active)}
+                className={`relative flex h-5 w-10 items-center rounded-full px-0.5 transition-colors cursor-pointer ${isActive ? 'justify-end bg-emerald-500' : 'justify-start bg-slate-300 dark:bg-slate-600'}`}
+              >
+                <span className="block h-4 w-4 rounded-full bg-white shadow-sm" />
+              </button>
+            </div>
+          )}
 
           <div>
             <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">

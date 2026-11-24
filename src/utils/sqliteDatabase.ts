@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS people (
   max_capacity_percent INTEGER NOT NULL DEFAULT 100,
   avatar_color TEXT NOT NULL,
   initials TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   notes TEXT NOT NULL DEFAULT ''
 );
 
@@ -452,6 +453,13 @@ function ensureSchema(db: SqlJsDatabase): void {
   db.run(SQLITE_RELATIONAL_SCHEMA_DDL);
   db.run('DROP TABLE IF EXISTS auth_users;');
 
+  const peopleCols = new Set(
+    queryRows(db, 'PRAGMA table_info(people);').map((r) => String(r.name || ''))
+  );
+  if (!peopleCols.has('is_active')) {
+    db.run("ALTER TABLE people ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1));");
+  }
+
   const allocCols = new Set(
     queryRows(db, 'PRAGMA table_info(allocations);').map((r) => String(r.name || ''))
   );
@@ -590,8 +598,8 @@ function writeStateIntoDb(
       db.run(
         `INSERT OR REPLACE INTO people (
           id, first_name, last_name, full_name, role, department,
-          employment_type, email, max_capacity_percent, avatar_color, initials, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          employment_type, email, max_capacity_percent, avatar_color, initials, is_active, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           p.id,
           p.firstName || p.name.split(' ')[0] || 'Team',
@@ -604,6 +612,7 @@ function writeStateIntoDb(
           p.maxCapacityPercent ?? 100,
           p.avatarColor || '#2563EB',
           p.initials || 'TM',
+          p.isActive !== false ? 1 : 0,
           p.notes || ''
         ]
       );
@@ -811,6 +820,7 @@ function readAppStateFromDb(db: SqlJsDatabase): AppState | null {
       maxCapacityPercent: Number(r.max_capacity_percent ?? 100),
       avatarColor: String(r.avatar_color || '#2563EB'),
       initials: String(r.initials || fullName.slice(0, 2).toUpperCase()),
+      isActive: Number(r.is_active ?? 1) !== 0,
       notes: String(r.notes || '')
     };
   });
@@ -1221,7 +1231,7 @@ export function exportSQLDumpScript(state: AppState): string {
         ? p.employmentType
         : 'Internal';
     lines.push(
-      `INSERT OR REPLACE INTO people (id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, avatar_color, initials, notes) VALUES (${sqlLiteral(
+      `INSERT OR REPLACE INTO people (id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, avatar_color, initials, is_active, notes) VALUES (${sqlLiteral(
         p.id
       )}, ${sqlLiteral(p.firstName || '')}, ${sqlLiteral(p.lastName || '')}, ${sqlLiteral(
         p.name
@@ -1229,7 +1239,7 @@ export function exportSQLDumpScript(state: AppState): string {
         p.email || ''
       )}, ${p.maxCapacityPercent ?? 100}, ${sqlLiteral(p.avatarColor || '#2563EB')}, ${sqlLiteral(
         p.initials || 'TM'
-      )}, ${sqlLiteral(p.notes || '')});`
+      )}, ${p.isActive !== false ? 1 : 0}, ${sqlLiteral(p.notes || '')});`
     );
   }
   lines.push('');

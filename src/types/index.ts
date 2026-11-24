@@ -37,6 +37,7 @@ export interface Person {
   maxCapacityPercent: number; // default 100
   avatarColor: string;
   initials: string;
+  isActive?: boolean; // Defaults to true for existing/imported records
   notes?: string; // Additional comments / staffing notes
 }
 

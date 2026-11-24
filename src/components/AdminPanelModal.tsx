@@ -500,7 +500,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-5xl h-[82vh] flex flex-col overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 w-full max-w-7xl h-[82vh] flex flex-col overflow-hidden">
         {/* Top Modal Header */}
         <div className="px-6 py-4 bg-slate-100/90 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -751,8 +751,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                       {person.initials}
                                     </div>
                                     <div>
-                                      <div className="font-semibold text-slate-900 dark:text-slate-100">
-                                        {formatPersonTableName(person)}
+                                      <div className="font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                                        <span>{formatPersonTableName(person)}</span>
+                                        {person.isActive === false && (
+                                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+                                            Inactive
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="text-[11px] text-slate-400 font-mono">
                                         {person.email}
