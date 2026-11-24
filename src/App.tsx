@@ -60,8 +60,10 @@ import { LoginOverlay } from './components/LoginOverlay';
 import { ExportScope } from './utils/importExportUtils';
 import {
   initSQLiteWorkspace,
-  syncAppStateToSQLite
+  syncAppStateToSQLite,
+  exportSQLiteBinaryFile
 } from './utils/sqliteDatabase';
+import { triggerBinaryDownload } from './utils/importExportUtils';
 import {
   AdminCollabState,
   WorkspaceMember,
@@ -1672,6 +1674,15 @@ export function App() {
           setAppState(fresh);
         }}
         onClearWorkspaceData={handleClearWorkspaceData}
+        onCreateWorkspaceBackup={async () => {
+          const bytes = await exportSQLiteBinaryFile(appState);
+          const dateStr = new Date().toISOString().slice(0, 10);
+          triggerBinaryDownload(
+            bytes,
+            `allocat-workspace-backup-${dateStr}.sqlite`,
+            'application/vnd.sqlite3'
+          );
+        }}
         currentUserUid={currentUser?.uid}
         userRole={currentRole}
         localUserRole={currentUser?.role || 'editor'}

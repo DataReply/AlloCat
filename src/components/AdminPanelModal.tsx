@@ -123,6 +123,7 @@ interface AdminPanelModalProps {
   onOpenExportImport: (scope?: ExportScope) => void;
   onResetWorkspace: () => void;
   onClearWorkspaceData?: (areas: ClearableDataArea[]) => void;
+  onCreateWorkspaceBackup: () => Promise<void>;
   // Team & Collaboration props
   currentUserUid?: string;
   userRole?: WorkspaceRole | 'viewer';
@@ -186,6 +187,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   onOpenExportImport,
   onResetWorkspace,
   onClearWorkspaceData,
+  onCreateWorkspaceBackup,
   currentUserUid,
   userRole = 'editor',
   localUserRole = 'editor',
@@ -255,6 +257,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   );
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearFeedback, setClearFeedback] = useState<string | null>(null);
+  const [backupDownloaded, setBackupDownloaded] = useState(false);
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [backupError, setBackupError] = useState<string | null>(null);
 
   // Team & Collaboration state
   const [teamBusy, setTeamBusy] = useState(false);
@@ -1916,8 +1921,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     const allAreaIds = areaOptions.map((o) => o.id);
                     const allSelected = allAreaIds.every((id) => selectedClearAreas.has(id));
 
-                    const toggleArea = (id: ClearableDataArea) => {
+                    const invalidateBackup = () => {
                       setConfirmClear(false);
+                      setBackupDownloaded(false);
+                      setBackupError(null);
+                    };
+
+                    const toggleArea = (id: ClearableDataArea) => {
+                      invalidateBackup();
                       setClearFeedback(null);
                       setSelectedClearAreas((prev) => {
                         const next = new Set(prev);
@@ -1928,21 +1939,35 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     };
 
                     const selectAllAreas = () => {
-                      setConfirmClear(false);
+                      invalidateBackup();
                       setClearFeedback(null);
                       setSelectedClearAreas(new Set(allAreaIds));
                     };
 
                     const selectOperationalOnly = () => {
-                      setConfirmClear(false);
+                      invalidateBackup();
                       setClearFeedback(null);
                       setSelectedClearAreas(new Set<ClearableDataArea>(['allocations', 'leaves']));
                     };
 
                     const clearAreaSelection = () => {
-                      setConfirmClear(false);
+                      invalidateBackup();
                       setClearFeedback(null);
                       setSelectedClearAreas(new Set());
+                    };
+
+                    const createAndDownloadBackup = async () => {
+                      setIsCreatingBackup(true);
+                      setBackupError(null);
+                      try {
+                        await onCreateWorkspaceBackup();
+                        setBackupDownloaded(true);
+                      } catch (error) {
+                        setBackupDownloaded(false);
+                        setBackupError(error instanceof Error ? error.message : 'Failed to create workspace backup.');
+                      } finally {
+                        setIsCreatingBackup(false);
+                      }
                     };
 
                     const executeClear = () => {
@@ -2073,8 +2098,29 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               : `${effectiveClearSet.size} table${effectiveClearSet.size === 1 ? '' : 's'}/area${effectiveClearSet.size === 1 ? '' : 's'} will be cleared`}
                           </span>
 
-                          {!confirmClear ? (
+                          {!backupDownloaded ? (
+                            <div className="flex flex-col items-end gap-1.5">
+                              {backupError && (
+                                <span className="text-[11px] text-rose-700 dark:text-rose-300">
+                                  {backupError}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                disabled={effectiveClearSet.size === 0 || isCreatingBackup}
+                                onClick={createAndDownloadBackup}
+                                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>{isCreatingBackup ? 'Creating Backup...' : 'Create & Download Backup'}</span>
+                              </button>
+                            </div>
+                          ) : !confirmClear ? (
                             <div className="flex flex-wrap items-center gap-2">
+                              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Backup downloaded
+                              </span>
                               <button
                                 type="button"
                                 disabled={effectiveClearSet.size === 0}
@@ -2085,9 +2131,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                 className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-lg transition-colors bg-white dark:bg-slate-900 border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                               >
                                 <Eraser className="w-3.5 h-3.5" />
-                                <span>
-                                  Clear Selected ({effectiveClearSet.size})
-                                </span>
+                                <span>Clear Selected ({effectiveClearSet.size})</span>
                               </button>
                               <button
                                 type="button"
