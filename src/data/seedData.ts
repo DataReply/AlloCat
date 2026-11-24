@@ -14,6 +14,22 @@ import {
 
 export const INITIAL_PEOPLE: Person[] = [
   {
+    id: 'p-tbd',
+    firstName: 'TBD',
+    lastName: 'Placeholder',
+    name: 'TBD Placeholder',
+    role: 'Unassigned / Placeholder',
+    department: 'General',
+    employmentType: 'Internal',
+    email: 'tbd.placeholder@company.internal',
+    maxCapacityPercent: 100,
+    avatarColor: '#64748B',
+    initials: 'TBD',
+    isActive: true,
+    isPlaceholder: true,
+    notes: 'Reserved placeholder for projects awaiting a named resource.'
+  },
+  {
     id: 'p-1',
     firstName: 'Marcus',
     lastName: 'Vance',
@@ -541,7 +557,7 @@ export function normalizeAppStatePayload(parsed: Partial<AppState> | null | unde
       ? parsed.departments
       : INITIAL_DEPARTMENTS;
 
-  const loadedPeople = parsed.people.map((p: Person) => {
+  const normalizedLoadedPeople = parsed.people.map((p: Person) => {
     const defaultPerson = INITIAL_PEOPLE.find((ip) => ip.id === p.id);
     const rawFullName = (p.name || '').trim();
     const nameParts = rawFullName ? rawFullName.split(/\s+/) : [];
@@ -568,9 +584,14 @@ export function normalizeAppStatePayload(parsed: Partial<AppState> | null | unde
           ? p.employmentType
           : defaultPerson?.employmentType || 'Internal',
       isActive: p.isActive !== undefined ? p.isActive : true,
+      isPlaceholder: p.isPlaceholder ?? p.id === 'p-tbd',
       notes: p.notes !== undefined ? p.notes : (defaultPerson?.notes || '')
     };
   });
+
+  const loadedPeople = normalizedLoadedPeople.some((person) => person.id === 'p-tbd')
+    ? normalizedLoadedPeople
+    : [INITIAL_PEOPLE[0], ...normalizedLoadedPeople];
 
   const loadedProjects = parsed.projects.map((proj: Project) => {
     const defaultProj = INITIAL_PROJECTS.find((ip) => ip.id === proj.id);
@@ -617,7 +638,7 @@ export function getDefaultAppState(): AppState {
   const defaultLeaveTypes = { ...DEFAULT_LEAVE_TYPE_CONFIG };
   syncLeaveTypeConfigRegistry(defaultLeaveTypes);
   return {
-    people: INITIAL_PEOPLE,
+    people: INITIAL_PEOPLE.map((person) => ({ ...person })),
     clients: INITIAL_CLIENTS,
     projects: INITIAL_PROJECTS,
     allocations: INITIAL_ALLOCATIONS,

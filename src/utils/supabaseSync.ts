@@ -268,6 +268,7 @@ function mapPerson(row: DatabaseRow): Person {
     avatarColor: asString(data.avatarColor, '#2563EB'),
     initials: asString(data.initials),
     isActive: data.isActive !== false,
+    isPlaceholder: data.isPlaceholder === true || row.id === 'p-tbd',
     notes: asString(data.notes)
   };
 }

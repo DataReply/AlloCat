@@ -864,6 +864,7 @@ export function App() {
   };
 
   const handleUpdatePerson = (updatedPerson: Person) => {
+    if (updatedPerson.id === 'p-tbd') return;
     setAppState((prev) => ({
       ...prev,
       people: prev.people.map((p) => (p.id === updatedPerson.id ? updatedPerson : p))
@@ -871,6 +872,7 @@ export function App() {
   };
 
   const handleDeletePerson = (personId: string) => {
+    if (personId === 'p-tbd') return;
     setAppState((prev) => ({
       ...prev,
       people: prev.people.filter((p) => p.id !== personId),

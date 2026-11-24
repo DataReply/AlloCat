@@ -103,6 +103,7 @@ CREATE TABLE IF NOT EXISTS people (
   avatar_color TEXT NOT NULL,
   initials TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+  is_placeholder INTEGER NOT NULL DEFAULT 0 CHECK (is_placeholder IN (0, 1)),
   notes TEXT NOT NULL DEFAULT ''
 );
 
@@ -459,6 +460,10 @@ function ensureSchema(db: SqlJsDatabase): void {
   if (!peopleCols.has('is_active')) {
     db.run("ALTER TABLE people ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1));");
   }
+  if (!peopleCols.has('is_placeholder')) {
+    db.run("ALTER TABLE people ADD COLUMN is_placeholder INTEGER NOT NULL DEFAULT 0 CHECK (is_placeholder IN (0, 1));");
+  }
+  db.run("UPDATE people SET is_placeholder = 1, is_active = 1 WHERE id = 'p-tbd';");
 
   const allocCols = new Set(
     queryRows(db, 'PRAGMA table_info(allocations);').map((r) => String(r.name || ''))
@@ -598,8 +603,8 @@ function writeStateIntoDb(
       db.run(
         `INSERT OR REPLACE INTO people (
           id, first_name, last_name, full_name, role, department,
-          employment_type, email, max_capacity_percent, avatar_color, initials, is_active, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          employment_type, email, max_capacity_percent, avatar_color, initials, is_active, is_placeholder, notes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           p.id,
           p.firstName || p.name.split(' ')[0] || 'Team',
@@ -613,6 +618,7 @@ function writeStateIntoDb(
           p.avatarColor || '#2563EB',
           p.initials || 'TM',
           p.isActive !== false ? 1 : 0,
+          p.isPlaceholder === true ? 1 : 0,
           p.notes || ''
         ]
       );
@@ -821,6 +827,7 @@ function readAppStateFromDb(db: SqlJsDatabase): AppState | null {
       avatarColor: String(r.avatar_color || '#2563EB'),
       initials: String(r.initials || fullName.slice(0, 2).toUpperCase()),
       isActive: Number(r.is_active ?? 1) !== 0,
+      isPlaceholder: Number(r.is_placeholder ?? 0) !== 0 || String(r.id) === 'p-tbd',
       notes: String(r.notes || '')
     };
   });
@@ -1231,7 +1238,7 @@ export function exportSQLDumpScript(state: AppState): string {
         ? p.employmentType
         : 'Internal';
     lines.push(
-      `INSERT OR REPLACE INTO people (id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, avatar_color, initials, is_active, notes) VALUES (${sqlLiteral(
+      `INSERT OR REPLACE INTO people (id, first_name, last_name, full_name, role, department, employment_type, email, max_capacity_percent, avatar_color, initials, is_active, is_placeholder, notes) VALUES (${sqlLiteral(
         p.id
       )}, ${sqlLiteral(p.firstName || '')}, ${sqlLiteral(p.lastName || '')}, ${sqlLiteral(
         p.name
@@ -1239,7 +1246,7 @@ export function exportSQLDumpScript(state: AppState): string {
         p.email || ''
       )}, ${p.maxCapacityPercent ?? 100}, ${sqlLiteral(p.avatarColor || '#2563EB')}, ${sqlLiteral(
         p.initials || 'TM'
-      )}, ${p.isActive !== false ? 1 : 0}, ${sqlLiteral(p.notes || '')});`
+      )}, ${p.isActive !== false ? 1 : 0}, ${p.isPlaceholder === true ? 1 : 0}, ${sqlLiteral(p.notes || '')});`
     );
   }
   lines.push('');

@@ -38,6 +38,7 @@ export interface Person {
   avatarColor: string;
   initials: string;
   isActive?: boolean; // Defaults to true for existing/imported records
+  isPlaceholder?: boolean; // Reserved planning placeholder with unrestricted allocation capacity
   notes?: string; // Additional comments / staffing notes
 }
 
